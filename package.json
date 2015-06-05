@@ -1,0 +1,31 @@
+{
+    "name": "milter",
+    "description": "bindings for writing postfix milter daemons",
+    "version": "0.0.1",
+    "author" : "jon shusta",
+    "maintainers":[
+        {
+            "name":"jons",
+            "email":"jon@wroth.org"
+        }
+    ],
+    "repository" : {
+        "type" : "git",
+        "url" : "http://github.com/jons/node-milter.git"
+    },
+    "scripts":{
+        "test": "nodeunit test"
+    },
+    "main" : "./lib/milter",
+    "licenses" : [
+        {
+            "type": "CCBY4.0",
+            "url": "http://creativecommons.org/licenses/by/4.0/"
+        }
+    ],
+    "devDependencies": {
+        "nodeunit": "*"
+    },
+    "engines": ["node >=0.4.0"],
+    "keywords": ["postfix", "milter"]
+}
