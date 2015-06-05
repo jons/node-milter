@@ -15,9 +15,8 @@ struct bindings
   Local<String> fi_connect;
 };
 
-static char *g_name = "node-milter";
 static int g_version = 1;
-static int g_flags = 0;
+static int g_flags = SMFIF_QUARANTINE;
 
 
 
@@ -119,7 +118,7 @@ sfsistat fi_close __P((SMFICTX *context))
 
 /**
  */
-void go (const FunctionCallbackInfo<Value> &args)
+void milter_register (const FunctionCallbackInfo<Value> &args)
 {
   Isolate *isolate = Isolate::GetCurrent();
   HandleScope scope(isolate);
@@ -133,7 +132,7 @@ void go (const FunctionCallbackInfo<Value> &args)
     return;
   }*/
 
-  desc.xxfi_name      = g_name;
+  desc.xxfi_name      = "node-bindings";
   desc.xxfi_version   = g_version;
   desc.xxfi_flags     = g_flags;
 
@@ -155,13 +154,22 @@ void go (const FunctionCallbackInfo<Value> &args)
   desc.xxfi_signal    = fi_signal;
 #endif
 
-  if (MI_SUCCESS != (r = smfi_register(desc)))
-  {
+  r = smfi_register(desc);
+
+  /*{
     isolate->ThrowException(Exception::Error(String::NewFromUtf8(isolate, "Callback Registration Failed")));
     return;
-  }
+  }*/
 
-  r = smfi_main();
+  args.GetReturnValue().Set(Number::New(isolate, r));
+}
+
+
+void milter_main (const FunctionCallbackInfo<Value> &args)
+{
+  Isolate *isolate = Isolate::GetCurrent();
+  HandleScope scope(isolate);
+  int r = smfi_main();
   args.GetReturnValue().Set(Number::New(isolate, r));
 }
 
@@ -171,7 +179,8 @@ void go (const FunctionCallbackInfo<Value> &args)
  */
 void init(Handle<Object> target)
 {
-  NODE_SET_METHOD(target, "main", go);
+  NODE_SET_METHOD(target, "main", milter_main);
+  NODE_SET_METHOD(target, "register", milter_register);
 }
 
 NODE_MODULE(milter, init)

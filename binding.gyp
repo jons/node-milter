@@ -3,7 +3,7 @@
     {
       "target_name": "milter",
       "sources": [ "src/milter.cc" ],
-      "ldflags": [ "-L/usr/lib/libmilter -lmilter" ]
+      "libraries": [ "-lmilter", "-L/usr/lib/libmilter" ]
     }
   ]
 }
