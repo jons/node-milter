@@ -15,7 +15,7 @@ struct bindings
   Local<String> fi_connect;
 };
 
-static int g_version = 1;
+static const char *g_name = "node-bindings";
 static int g_flags = SMFIF_QUARANTINE;
 
 
@@ -24,14 +24,13 @@ static int g_flags = SMFIF_QUARANTINE;
  */
 sfsistat fi_connect __P((SMFICTX *context, char *hostname, _SOCK_ADDR *sa))
 {
-  bindings *local = (bindings *)smfi_getpriv(context);
   Isolate *isolate = Isolate::GetCurrent();
   HandleScope scope(isolate);
 
   char s[INET6_ADDRSTRLEN+1];
   inet_ntop(AF_INET, sa, s, sizeof s);
 
-  Local<Function> cb = Local<Function>::Cast(local->fi_connect);
+  Local<Function> cb = Local<Function>::Cast(String::NewFromUtf8(isolate, "milter_connect"));
   const unsigned argc = 2;
   Local<Value> argv[argc] = {
     String::NewFromUtf8(isolate, hostname),
@@ -132,8 +131,8 @@ void milter_register (const FunctionCallbackInfo<Value> &args)
     return;
   }*/
 
-  desc.xxfi_name      = "node-bindings";
-  desc.xxfi_version   = g_version;
+  desc.xxfi_name      =(char *)g_name;
+  desc.xxfi_version   = SMFI_VERSION;
   desc.xxfi_flags     = g_flags;
 
   desc.xxfi_connect   = fi_connect;
@@ -165,6 +164,19 @@ void milter_register (const FunctionCallbackInfo<Value> &args)
 }
 
 
+/**
+ */
+void milter_setconn (const FunctionCallbackInfo<Value> &args)
+{
+  Isolate *isolate = Isolate::GetCurrent();
+  HandleScope scope(isolate);
+  int r = smfi_setconn("inet:12345");
+  args.GetReturnValue().Set(Number::New(isolate, r));
+}
+
+
+/**
+ */
 void milter_main (const FunctionCallbackInfo<Value> &args)
 {
   Isolate *isolate = Isolate::GetCurrent();
@@ -177,9 +189,10 @@ void milter_main (const FunctionCallbackInfo<Value> &args)
 /**
  * module initialization
  */
-void init(Handle<Object> target)
+void init (Handle<Object> target)
 {
   NODE_SET_METHOD(target, "main", milter_main);
+  NODE_SET_METHOD(target, "setconn", milter_setconn);
   NODE_SET_METHOD(target, "register", milter_register);
 }
 
