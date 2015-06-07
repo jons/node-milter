@@ -2,20 +2,24 @@
  * node bindings for milter
  */
 
-#include <libmilter/mfapi.h>
 #include <node.h>
 #include <v8.h>
 #include <arpa/inet.h>
+
+#include "libmilter/mfapi.h"
 
 using namespace v8;
 
 
 struct bindings
 {
-  Local<String> fi_connect;
+  Isolate *isolate;
+  Function connect;
 };
 
+
 static const char *g_name = "node-bindings";
+
 static int g_flags = SMFIF_QUARANTINE;
 
 
@@ -25,24 +29,38 @@ static int g_flags = SMFIF_QUARANTINE;
 sfsistat fi_connect __P((SMFICTX *context, char *hostname, _SOCK_ADDR *sa))
 {
   Isolate *isolate = Isolate::GetCurrent();
-  HandleScope scope(isolate);
+  struct bindings *local = (struct bindings *)smfi_getpriv(context);
+  int r;
 
+  fprintf(stderr, "connect %s\n", hostname);
+  /*
   char s[INET6_ADDRSTRLEN+1];
   inet_ntop(AF_INET, sa, s, sizeof s);
+  */
 
-  Local<Function> cb = Local<Function>::Cast(String::NewFromUtf8(isolate, "milter_connect"));
-  const unsigned argc = 2;
+  const unsigned argc = 1;
   Local<Value> argv[argc] = {
-    String::NewFromUtf8(isolate, hostname),
-    String::NewFromUtf8(isolate, s)
+    String::NewFromUtf8(isolate, "hello")
   };
-  Local<Value> r = cb->Call(isolate->GetCurrentContext()->Global(), argc, argv);
-  if (!r->IsNumber())
+
+  if (!local->connect->IsFunction())
   {
-    // TODO: throw an exception in node.js
+    //isolate->ThrowException(Exception::Error(String::NewFromUtf8(isolate, "milter_connect is not a function")));
+    printf("tempfail 1\n");
     return SMFIS_TEMPFAIL;
   }
-  return r->IntegerValue();
+
+  Local<Value> rv = local->connect->Call(isolate->GetCurrentContext()->Global(), argc, argv);
+  if (!rv->IsNumber())
+  {
+    //isolate->ThrowException(Exception::Error(String::NewFromUtf8(isolate, "milter_connect must return a number")));
+    printf("tempfail 2\n");
+    return SMFIS_TEMPFAIL;
+  }
+  r = rv->IntegerValue();
+  printf("returning %d on connect\n", r);
+
+  return SMFIS_CONTINUE;
 }
 
 
@@ -117,24 +135,50 @@ sfsistat fi_close __P((SMFICTX *context))
 
 /**
  */
-void milter_register (const FunctionCallbackInfo<Value> &args)
+void milter_main (const FunctionCallbackInfo<Value> &args)
 {
   Isolate *isolate = Isolate::GetCurrent();
   HandleScope scope(isolate);
-
-  int r;
+  struct bindings *local = new struct bindings;
   struct smfiDesc desc;
+  int r;
 
-  /*if (!args[0]->IsString())
+  local->isolate = isolate;
+
+  if (args.Length() < 2)
   {
-    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Expected string argument")));
+    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "milter: wrong number of arguments")));
     return;
-  }*/
+  }
+
+  if (!args[0]->IsString())
+  {
+    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "milter: expected string as first argument")));
+    return;
+  }
+
+  if (!args[1]->IsObject())
+  {
+    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "milter: expected object as second argument")));
+    return;
+  }
+
+  Local<Object> cbmap = Local<Object>::Cast(args[1]);
+
+  if (cbmap->Has(String::NewFromUtf8(isolate, "connect")))
+  {
+    Local<Function> connect = Local<Function>::Cast(cbmap->GetRealNamedProperty(String::NewFromUtf8(isolate, "connect")));
+
+    Handle<String> name = connect->GetDisplayName()->ToString();
+
+    printf("have function: %s\n", name->GetExternalAsciiStringResource()->data());
+
+    local->connect = Persistent<Function>::New(isolate, connect);
+  }
 
   desc.xxfi_name      =(char *)g_name;
   desc.xxfi_version   = SMFI_VERSION;
   desc.xxfi_flags     = g_flags;
-
   desc.xxfi_connect   = fi_connect;
   desc.xxfi_unknown   = fi_unknown;
   desc.xxfi_helo      = fi_helo;
@@ -152,36 +196,11 @@ void milter_register (const FunctionCallbackInfo<Value> &args)
   // signal handler is not implemented yet
   desc.xxfi_signal    = fi_signal;
 #endif
-
   r = smfi_register(desc);
-
-  /*{
-    isolate->ThrowException(Exception::Error(String::NewFromUtf8(isolate, "Callback Registration Failed")));
-    return;
-  }*/
-
-  args.GetReturnValue().Set(Number::New(isolate, r));
-}
-
-
-/**
- */
-void milter_setconn (const FunctionCallbackInfo<Value> &args)
-{
-  Isolate *isolate = Isolate::GetCurrent();
-  HandleScope scope(isolate);
-  int r = smfi_setconn("inet:12345");
-  args.GetReturnValue().Set(Number::New(isolate, r));
-}
-
-
-/**
- */
-void milter_main (const FunctionCallbackInfo<Value> &args)
-{
-  Isolate *isolate = Isolate::GetCurrent();
-  HandleScope scope(isolate);
-  int r = smfi_main();
+  r = smfi_setconn((char *)"inet:12345");
+  r = smfi_main(local);
+  // this does not return until interrupt
+  delete local;
   args.GetReturnValue().Set(Number::New(isolate, r));
 }
 
@@ -192,8 +211,6 @@ void milter_main (const FunctionCallbackInfo<Value> &args)
 void init (Handle<Object> target)
 {
   NODE_SET_METHOD(target, "main", milter_main);
-  NODE_SET_METHOD(target, "setconn", milter_setconn);
-  NODE_SET_METHOD(target, "register", milter_register);
 }
 
 NODE_MODULE(milter, init)

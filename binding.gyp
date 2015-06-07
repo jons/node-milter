@@ -2,8 +2,10 @@
   "targets": [
     {
       "target_name": "milter",
-      "sources": [ "src/milter.cc" ],
-      "libraries": [ "-lmilter", "-L/usr/lib/libmilter" ]
+      "sources": [ "src/milter.cc"],
+      "include_dirs": [ "." ],
+      "cflags": [ "-g" ],
+      "libraries" : [ "../libmilter/libmilter.so" ]
     }
   ]
 }
