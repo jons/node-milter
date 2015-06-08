@@ -2,6 +2,7 @@
  * node bindings for milter
  */
 
+#include <node/uv.h>
 #include <node.h>
 #include <v8.h>
 #include <arpa/inet.h>
@@ -9,12 +10,22 @@
 #include "libmilter/mfapi.h"
 
 using namespace v8;
+using namespace node;
+
+typedef struct privdata privdata_t;
+typedef struct bindings bindings_t;
+
+struct privdata
+{
+  int id;
+};
 
 
 struct bindings
 {
-  Isolate *isolate;
-  Function connect;
+  uv_work_t request;
+  privdata_t *_priv;
+  int retval;
 };
 
 
@@ -26,45 +37,20 @@ static int g_flags = SMFIF_QUARANTINE;
 
 /**
  */
-sfsistat fi_connect __P((SMFICTX *context, char *hostname, _SOCK_ADDR *sa))
+sfsistat fi_connect (SMFICTX *context, char *host, _SOCK_ADDR *sa)
 {
-  Isolate *isolate = Isolate::GetCurrent();
-  struct bindings *local = (struct bindings *)smfi_getpriv(context);
-  int r;
-
-  fprintf(stderr, "connect %s\n", hostname);
-  /*
+  privdata_t *priv = (privdata_t *)smfi_getpriv(context);
   char s[INET6_ADDRSTRLEN+1];
+
   inet_ntop(AF_INET, sa, s, sizeof s);
-  */
+  priv->id = 0;
 
-  const unsigned argc = 1;
-  Local<Value> argv[argc] = {
-    String::NewFromUtf8(isolate, "hello")
-  };
-
-  if (!local->connect->IsFunction())
-  {
-    //isolate->ThrowException(Exception::Error(String::NewFromUtf8(isolate, "milter_connect is not a function")));
-    printf("tempfail 1\n");
-    return SMFIS_TEMPFAIL;
-  }
-
-  Local<Value> rv = local->connect->Call(isolate->GetCurrentContext()->Global(), argc, argv);
-  if (!rv->IsNumber())
-  {
-    //isolate->ThrowException(Exception::Error(String::NewFromUtf8(isolate, "milter_connect must return a number")));
-    printf("tempfail 2\n");
-    return SMFIS_TEMPFAIL;
-  }
-  r = rv->IntegerValue();
-  printf("returning %d on connect\n", r);
-
+  fprintf(stderr, "connect \"%s\" \"%s\"\n", host, s);
   return SMFIS_CONTINUE;
 }
 
 
-sfsistat fi_negotiate __P((SMFICTX *context,
+sfsistat fi_negotiate (SMFICTX *context,
                            unsigned long a,
                            unsigned long b,
                            unsigned long c,
@@ -72,109 +58,110 @@ sfsistat fi_negotiate __P((SMFICTX *context,
                            unsigned long *e,
                            unsigned long *f,
                            unsigned long *g,
-                           unsigned long *h))
+                           unsigned long *h)
 {
+  fprintf(stderr, "negotiate %lu %lu %lu %lu\n", a, b, c, d);
   return SMFIS_CONTINUE;
 }
 
-sfsistat fi_unknown __P((SMFICTX *context, const char *command))
+sfsistat fi_unknown (SMFICTX *context, const char *command)
 {
+  fprintf(stderr, "unknown \"%s\"\n", command);
   return SMFIS_CONTINUE;
 }
 
-sfsistat fi_helo __P((SMFICTX *context, char *helo))
+sfsistat fi_helo (SMFICTX *context, char *helo)
 {
+  fprintf(stderr, "helo \"%s\"\n", helo);
   return SMFIS_CONTINUE;
 }
 
-sfsistat fi_envfrom __P((SMFICTX *context, char **argv))
+sfsistat fi_envfrom (SMFICTX *context, char **argv)
 {
+  fprintf(stderr, "envfrom \"%s\"\n", argv[0]);
   return SMFIS_CONTINUE;
 }
 
-sfsistat fi_envrcpt __P((SMFICTX *context, char **argv))
+sfsistat fi_envrcpt (SMFICTX *context, char **argv)
 {
+  fprintf(stderr, "envrcpt \"%s\"\n", argv[0]);
   return SMFIS_CONTINUE;
 }
 
-sfsistat fi_data __P((SMFICTX *context))
+sfsistat fi_data (SMFICTX *context)
 {
+  fprintf(stderr, "data\n");
   return SMFIS_CONTINUE;
 }
 
-sfsistat fi_header __P((SMFICTX *context, char *name, char *value))
+sfsistat fi_header (SMFICTX *context, char *name, char *value)
 {
+  fprintf(stderr, "header\n");
   return SMFIS_CONTINUE;
 }
 
-sfsistat fi_eoh __P((SMFICTX *context))
+sfsistat fi_eoh (SMFICTX *context)
 {
+  fprintf(stderr, "eoh\n");
   return SMFIS_CONTINUE;
 }
 
-sfsistat fi_body __P((SMFICTX *context, unsigned char *body, size_t len))
+sfsistat fi_body (SMFICTX *context, unsigned char *body, size_t len)
 {
+  fprintf(stderr, "body\n");
   return SMFIS_CONTINUE;
 }
 
-sfsistat fi_eom __P((SMFICTX *context))
+sfsistat fi_eom (SMFICTX *context)
 {
+  fprintf(stderr, "eom\n");
   return SMFIS_CONTINUE;
 }
 
-sfsistat fi_abort __P((SMFICTX *context))
+sfsistat fi_abort (SMFICTX *context)
 {
+  fprintf(stderr, "abort\n");
   return SMFIS_CONTINUE;
 }
 
-sfsistat fi_close __P((SMFICTX *context))
+sfsistat fi_close (SMFICTX *context)
 {
+  fprintf(stderr, "close\n");
   return SMFIS_CONTINUE;
+}
+
+/**
+ */
+void milter_worker (uv_work_t *request)
+{
+  bindings_t *local = static_cast<bindings_t *>(request->data);
+  local->retval = smfi_main(local->_priv);
+}
+
+
+void milter_cleanup (uv_work_t *request, int status)
+{
+  Isolate *isolate = Isolate::GetCurrent();
+  HandleScope scope(isolate);
+  bindings_t *local = static_cast<bindings_t *>(request->data);
+
+  // TODO: do something with local->retval ?
+
+  delete local->_priv;
+  delete local;
 }
 
 
 /**
  */
-void milter_main (const FunctionCallbackInfo<Value> &args)
+void milter_start (const FunctionCallbackInfo<Value> &args)
 {
   Isolate *isolate = Isolate::GetCurrent();
   HandleScope scope(isolate);
-  struct bindings *local = new struct bindings;
+
+  bindings_t *local = new bindings_t();
   struct smfiDesc desc;
   int r;
-
-  local->isolate = isolate;
-
-  if (args.Length() < 2)
-  {
-    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "milter: wrong number of arguments")));
-    return;
-  }
-
-  if (!args[0]->IsString())
-  {
-    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "milter: expected string as first argument")));
-    return;
-  }
-
-  if (!args[1]->IsObject())
-  {
-    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "milter: expected object as second argument")));
-    return;
-  }
-
-  Local<Object> cbmap = Local<Object>::Cast(args[1]);
-
-  if (cbmap->Has(String::NewFromUtf8(isolate, "connect")))
-  {
-    Local<Function> connect = Local<Function>::Cast(cbmap->GetRealNamedProperty(String::NewFromUtf8(isolate, "connect")));
-
-    Handle<String> name = connect->GetDisplayName()->ToString();
-
-    printf("have function: %s\n", name->GetExternalAsciiStringResource()->data());
-
-    local->connect = Persistent<Function>::New(isolate, connect);
-  }
 
   desc.xxfi_name      =(char *)g_name;
   desc.xxfi_version   = SMFI_VERSION;
@@ -196,12 +183,43 @@ void milter_main (const FunctionCallbackInfo<Value> &args)
   // signal handler is not implemented yet
   desc.xxfi_signal    = fi_signal;
 #endif
+
+  local->_priv = new privdata_t();
+  local->request.data = local;
+
+  if (args.Length() < 1)
+  {
+    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Wrong number of arguments")));
+    return;
+  }
+
+  if (!args[0]->IsString())
+  {
+    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "First argument: expected string")));
+    return;
+  }
+
+  Local<String> connstr = args[0]->ToString();
+  char *c_connstr = new char[connstr->Utf8Length()+1];
+  connstr->WriteUtf8(c_connstr);
+  bool ok = false;
+
   r = smfi_register(desc);
-  r = smfi_setconn((char *)"inet:12345");
-  r = smfi_main(local);
-  // this does not return until interrupt
-  delete local;
-  args.GetReturnValue().Set(Number::New(isolate, r));
+  if (MI_SUCCESS == r)
+  {
+    r = smfi_setconn(c_connstr);
+    if (MI_SUCCESS == r)
+    {
+      uv_queue_work(uv_default_loop(), &local->request, milter_worker, milter_cleanup);
+      ok = true;
+    }
+  }
+  delete c_connstr;
+  if (ok)
+    args.GetReturnValue().Set(Number::New(isolate, ok ? 0 : -1));
+
+  // TODO: if not ok, send error number and description somewhere
+  //       or put them in an object and return it, or throw an exception
 }
 
 
@@ -210,7 +228,7 @@ void milter_main (const FunctionCallbackInfo<Value> &args)
  */
 void init (Handle<Object> target)
 {
-  NODE_SET_METHOD(target, "main", milter_main);
+  NODE_SET_METHOD(target, "start", milter_start);
 }
 
 NODE_MODULE(milter, init)
