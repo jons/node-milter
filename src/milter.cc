@@ -12,19 +12,17 @@
 using namespace v8;
 using namespace node;
 
-typedef struct privdata privdata_t;
 typedef struct bindings bindings_t;
-
-struct privdata
-{
-  int id;
-};
 
 
 struct bindings
 {
+  uv_loop_t *loop;
   uv_work_t request;
-  privdata_t *_priv;
+  uv_async_t as_connect;
+
+  Persistent<Object, CopyablePersistentTraits<Object> > events;
+
   int retval;
 };
 
@@ -34,18 +32,34 @@ static const char *g_name = "node-bindings";
 static int g_flags = SMFIF_QUARANTINE;
 
 
+/**
+ */
+void as_connect (uv_async_t *h)
+{
+  Isolate *isolate = Isolate::GetCurrent();
+  HandleScope scope (isolate);
+
+  // TODO: does this crash? sheeeeeeeeit
+  fprintf(stderr, "as_connect\n");
+}
+
+
 
 /**
  */
 sfsistat fi_connect (SMFICTX *context, char *host, _SOCK_ADDR *sa)
 {
-  privdata_t *priv = (privdata_t *)smfi_getpriv(context);
+  bindings_t *local = (bindings_t *)smfi_getpriv(context);
   char s[INET6_ADDRSTRLEN+1];
 
-  inet_ntop(AF_INET, sa, s, sizeof s);
-  priv->id = 0;
+  inet_ntop(AF_INET, &((sockaddr_in *)sa)->sin_addr, s, sizeof s);
 
   fprintf(stderr, "connect \"%s\" \"%s\"\n", host, s);
+
+  // TODO: create new entry for
+
+  uv_async_send(&local->as_connect);
+
   return SMFIS_CONTINUE;
 }
 
@@ -135,7 +149,7 @@ sfsistat fi_close (SMFICTX *context)
 void milter_worker (uv_work_t *request)
 {
   bindings_t *local = static_cast<bindings_t *>(request->data);
-  local->retval = smfi_main(local->_priv);
+  local->retval = smfi_main(local);
 }
 
 
@@ -145,9 +159,8 @@ void milter_cleanup (uv_work_t *request, int status)
   HandleScope scope(isolate);
   bindings_t *local = static_cast<bindings_t *>(request->data);
 
-  // TODO: do something with local->retval ?
+  uv_close((uv_handle_t *)&local->as_connect, NULL);
 
-  delete local->_priv;
   delete local;
 }
 
@@ -156,10 +169,10 @@ void milter_cleanup (uv_work_t *request, int status)
  */
 void milter_start (const FunctionCallbackInfo<Value> &args)
 {
+  bindings_t *local = new bindings_t();
   Isolate *isolate = Isolate::GetCurrent();
   HandleScope scope(isolate);
 
-  bindings_t *local = new bindings_t();
   struct smfiDesc desc;
   int r;
 
@@ -184,7 +197,6 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
   desc.xxfi_signal    = fi_signal;
 #endif
 
-  local->_priv = new privdata_t();
   local->request.data = local;
 
   if (args.Length() < 1)
@@ -210,17 +222,63 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
     r = smfi_setconn(c_connstr);
     if (MI_SUCCESS == r)
     {
-      uv_queue_work(uv_default_loop(), &local->request, milter_worker, milter_cleanup);
+      local->loop = uv_default_loop();
+      uv_async_init(local->loop, &local->as_connect, as_connect);
+      uv_queue_work(local->loop, &local->request, milter_worker, milter_cleanup);
       ok = true;
     }
   }
   delete c_connstr;
-  if (ok)
-    args.GetReturnValue().Set(Number::New(isolate, ok ? 0 : -1));
 
+  if (ok)
+  {
+    Local<Object> obj = Object::New(isolate);
+
+    //obj->Set(String::NewFromUtf8(isolate, "connect"), );
+
+    Persistent<Object, CopyablePersistentTraits<Object> > pobj (isolate, obj);
+
+    local->events = pobj;
+
+    args.GetReturnValue().Set(obj);
+  }
   // TODO: if not ok, send error number and description somewhere
   //       or put them in an object and return it, or throw an exception
 }
+
+
+/**
+ */
+int cb_connect (Handle<Object> context, const char *host)
+{
+  Isolate *isolate = Isolate::GetCurrent();
+  const unsigned argc = 1;
+  Local<Value> argv[argc] = {
+    String::NewFromUtf8(isolate, host)
+  };
+  TryCatch tc;
+  fprintf(stderr, "cb_connect precall\n");
+  Handle<Value> h = node::MakeCallback(isolate, context, "connect", argc, argv);
+  fprintf(stderr, "cb_connect postcall\n");
+  if (tc.HasCaught())
+  {
+    fprintf(stderr, "cb_connect exception\n");
+    FatalException(tc);
+    return SMFIS_TEMPFAIL;
+  }
+
+  if (h->IsNumber())
+  {
+    fprintf(stderr, "cb_connect retval\n");
+    Local<Number> n = h->ToNumber();
+    return n->IntegerValue();
+  }
+
+  // TODO: throw exception
+  fprintf(stderr, "cb_connect tempfail\n");
+  return SMFIS_TEMPFAIL;
+}
+
 
 
 /**
@@ -228,6 +286,17 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
  */
 void init (Handle<Object> target)
 {
+  Isolate *isolate = Isolate::GetCurrent();
+
+  target->Set(String::NewFromUtf8(isolate, "SMFIS_CONTINUE"), Number::New(isolate, SMFIS_CONTINUE));
+  target->Set(String::NewFromUtf8(isolate, "SMFIS_REJECT"),   Number::New(isolate, SMFIS_REJECT));
+  target->Set(String::NewFromUtf8(isolate, "SMFIS_DISCARD"),  Number::New(isolate, SMFIS_DISCARD));
+  target->Set(String::NewFromUtf8(isolate, "SMFIS_ACCEPT"),   Number::New(isolate, SMFIS_ACCEPT));
+  target->Set(String::NewFromUtf8(isolate, "SMFIS_TEMPFAIL"), Number::New(isolate, SMFIS_TEMPFAIL));
+  target->Set(String::NewFromUtf8(isolate, "SMFIS_NOREPLY"),  Number::New(isolate, SMFIS_NOREPLY));
+  target->Set(String::NewFromUtf8(isolate, "SMFIS_SKIP"),     Number::New(isolate, SMFIS_SKIP));
+  target->Set(String::NewFromUtf8(isolate, "SMFIS_ALL_OPTS"), Number::New(isolate, SMFIS_ALL_OPTS));
+
   NODE_SET_METHOD(target, "start", milter_start);
 }
 

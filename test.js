@@ -5,9 +5,10 @@ function connect (host)
 {
   console.log("connect");
   console.log(host);
-  return 123;
+  return milter.SMFIS_CONTINUE;
 }
 
 process.on('uncaughtException', function (e) { console.log(e); });
 
+console.log(milter);
 console.log(milter.start("inet:12345"));
