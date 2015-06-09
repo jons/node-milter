@@ -2,6 +2,7 @@
  * node bindings for milter
  */
 
+#include <string.h>
 #include <node/uv.h>
 #include <node.h>
 #include <v8.h>
@@ -13,18 +14,37 @@ using namespace v8;
 using namespace node;
 
 typedef struct bindings bindings_t;
-
+typedef struct testevent testevent_t;
 
 struct bindings
 {
   uv_loop_t *loop;
   uv_work_t request;
-  uv_async_t as_connect;
+  uv_async_t trigger;
 
-  Persistent<Object, CopyablePersistentTraits<Object> > events;
+  pthread_mutex_t lck_queue;
+  testevent_t *first, *last;
+
+  //Persistent<Object, CopyablePersistentTraits<Object> > event_context;
+  Persistent<Object> event_context;
 
   int retval;
 };
+
+
+struct testevent
+{
+  testevent_t *next;
+
+  pthread_mutex_t lock;
+  pthread_cond_t ready;
+  int is_done;
+  int fi_retval;
+
+  char h[1024];
+  char s[INET6_ADDRSTRLEN+1];
+};
+
 
 
 static const char *g_name = "node-bindings";
@@ -34,15 +54,131 @@ static int g_flags = SMFIF_QUARANTINE;
 
 /**
  */
-void as_connect (uv_async_t *h)
+void queue_init (bindings_t *local)
 {
-  Isolate *isolate = Isolate::GetCurrent();
-  HandleScope scope (isolate);
-
-  // TODO: does this crash? sheeeeeeeeit
-  fprintf(stderr, "as_connect\n");
+  pthread_mutex_init(&local->lck_queue, NULL);
+  local->first = NULL;
+  local->last = NULL;
 }
 
+
+/**
+ */
+void queue_e (bindings_t *local, testevent_t *ev)
+{
+  ev->next = NULL;
+  if (NULL == local->last)
+  {
+    local->first = ev;
+    local->last = ev;
+  }
+  else
+  {
+    local->last->next = ev;
+    local->last = ev;
+  }
+}
+
+
+/**
+ */
+testevent_t *queue_d (bindings_t *local)
+{
+  testevent_t *ev = local->first;
+  if (NULL != ev)
+  {
+    if (local->last == local->first)
+      local->last = NULL;
+    local->first = ev->next;
+    ev->next = NULL;
+  }
+  return ev;
+}
+
+
+/**
+ */
+int fe_connect (Isolate *isolate, Handle<Object> context, const char *host, const char *address)
+{
+  const unsigned argc = 2;
+  Local<Value> argv[argc] = {
+    String::NewFromUtf8(isolate, host),
+    String::NewFromUtf8(isolate, address)
+  };
+  TryCatch tc;
+  fprintf(stderr, "fe_connect precall\n");
+  Handle<Value> h = node::MakeCallback(isolate, context, "connect", argc, argv);
+  fprintf(stderr, "fe_connect postcall\n");
+  if (tc.HasCaught())
+  {
+    fprintf(stderr, "fe_connect exception\n");
+    FatalException(tc);
+    return SMFIS_TEMPFAIL;
+  }
+
+  if (h->IsNumber())
+  {
+    fprintf(stderr, "fe_connect retval\n");
+    Local<Number> n = h->ToNumber();
+    return n->IntegerValue();
+  }
+
+  // TODO: throw exception
+  fprintf(stderr, "fe_connect tempfail\n");
+  return SMFIS_TEMPFAIL;
+}
+
+
+
+/**
+ * event multiplexer.
+ *
+ * all queued events reach node.js from this point.
+ *
+ */
+void trigger_event (uv_async_t *h)
+{
+  bindings *local = (bindings *)h->data;
+  Isolate *isolate = Isolate::GetCurrent();
+  HandleScope scope (isolate);
+  testevent_t *ev;
+
+  fprintf(stderr, "trigger_event local=%p\n", local);
+
+  // grab the queue lock
+  pthread_mutex_lock(&local->lck_queue);
+
+  fprintf(stderr, "trigger_event queue locked\n");
+
+  // drain events off of queue and deliver them to node.js
+  ev = queue_d(local);
+
+  // relinquish the queue lock
+  pthread_mutex_unlock(&local->lck_queue);
+
+  fprintf(stderr, "trigger_event event %p\n", ev);
+
+  if (NULL != ev)
+  {
+    // grab event lock
+    pthread_mutex_lock(&ev->lock);
+
+    fprintf(stderr, "trigger_event event locked\n");
+
+    Local<Object> context = Local<Object>::New(isolate, local->event_context);
+
+    // launch the appropriate node.js callback for the given event
+    ev->fi_retval = fe_connect(isolate, context, ev->h, ev->s);
+
+    // complete the work
+    ev->is_done = 1;
+
+    // signal the waiting milter worker thread
+    // that thread is still responsible for the event heap memory
+    pthread_cond_signal(&ev->ready);
+    pthread_mutex_unlock(&ev->lock);
+  }
+}
 
 
 /**
@@ -50,16 +186,63 @@ void as_connect (uv_async_t *h)
 sfsistat fi_connect (SMFICTX *context, char *host, _SOCK_ADDR *sa)
 {
   bindings_t *local = (bindings_t *)smfi_getpriv(context);
-  char s[INET6_ADDRSTRLEN+1];
+  int retval;
 
-  inet_ntop(AF_INET, &((sockaddr_in *)sa)->sin_addr, s, sizeof s);
+  // create connect event
+  testevent *event = new testevent();
+  event->is_done = 0;
+  pthread_mutex_init(&event->lock, NULL);
+  pthread_cond_init(&event->ready, NULL);
+  memcpy(event->h, host, strlen(host)+1);
+  inet_ntop(AF_INET, &((sockaddr_in *)sa)->sin_addr, event->s, sizeof event->s);
+  fprintf(stderr, "connect %p \"%s\" \"%s\"\n", &event->lock, event->h, event->s);
 
-  fprintf(stderr, "connect \"%s\" \"%s\"\n", host, s);
+  // lock the queue
+  if (pthread_mutex_lock(&local->lck_queue))
+  {
+    delete event;
+    fprintf(stderr, "node-milter: queue lock failed\n");
+    return SMFIS_TEMPFAIL;
+  }
 
-  // TODO: create new entry for
+  // lock the event
+  if (pthread_mutex_lock(&event->lock))
+  {
+    delete event;
+    pthread_mutex_unlock(&local->lck_queue);
+    // TODO: handle error
 
-  uv_async_send(&local->as_connect);
+    fprintf(stderr, "node-milter: event lock failed\n");
+    return SMFIS_TEMPFAIL;
+  }
 
+  // enqueue the event
+  queue_e(local, event);
+
+  // unlock the queue
+  pthread_mutex_unlock(&local->lck_queue);
+
+  for (;;)
+  {
+    // let the node loop know we await a result
+    uv_async_send(&local->trigger);
+
+    // wait on the event's return condition
+    pthread_cond_wait(&event->ready, &event->lock);
+    if (event->is_done) break;
+    fprintf(stderr, "node-milter: incomplete task\n");
+  }
+  // retrieve return code
+  retval = event->fi_retval;
+
+  // destroy event
+  pthread_mutex_unlock(&event->lock);
+  pthread_cond_destroy(&event->ready);
+  pthread_mutex_destroy(&event->lock);
+  delete event;
+
+  // remember this is a unique _pthread_ from libmilter, NOT a libuv or node thread!
+  fprintf(stderr, "node-milter: connect retval=%d\n", retval);
   return SMFIS_CONTINUE;
 }
 
@@ -144,23 +327,39 @@ sfsistat fi_close (SMFICTX *context)
   return SMFIS_CONTINUE;
 }
 
+
 /**
+ * run async version of smfi_main, which is blocking
  */
 void milter_worker (uv_work_t *request)
 {
   bindings_t *local = static_cast<bindings_t *>(request->data);
-  local->retval = smfi_main(local);
+  int r;
+  r = smfi_main(local);
+
+  // TODO: any concurrency issues here?
+
+  local->retval = r;
 }
 
 
+/**
+ * cleanup after smfi_main finally stops.
+ */
 void milter_cleanup (uv_work_t *request, int status)
 {
   Isolate *isolate = Isolate::GetCurrent();
   HandleScope scope(isolate);
   bindings_t *local = static_cast<bindings_t *>(request->data);
 
-  uv_close((uv_handle_t *)&local->as_connect, NULL);
+  // immediately stop event delivery
+  uv_close((uv_handle_t *)&local->trigger, NULL);
 
+  // TODO: call a "end" callback provided during instantiation? unsure how to do this, probably with a persistent function
+
+  local->event_context.Reset();
+
+  pthread_mutex_destroy(&local->lck_queue);
   delete local;
 }
 
@@ -172,7 +371,6 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
   bindings_t *local = new bindings_t();
   Isolate *isolate = Isolate::GetCurrent();
   HandleScope scope(isolate);
-
   struct smfiDesc desc;
   int r;
 
@@ -197,7 +395,9 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
   desc.xxfi_signal    = fi_signal;
 #endif
 
+  // connect libuv
   local->request.data = local;
+  local->trigger.data = local;
 
   if (args.Length() < 1)
   {
@@ -211,6 +411,8 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
     return;
   }
 
+  queue_init(local);
+
   Local<String> connstr = args[0]->ToString();
   char *c_connstr = new char[connstr->Utf8Length()+1];
   connstr->WriteUtf8(c_connstr);
@@ -223,7 +425,7 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
     if (MI_SUCCESS == r)
     {
       local->loop = uv_default_loop();
-      uv_async_init(local->loop, &local->as_connect, as_connect);
+      uv_async_init(local->loop, &local->trigger, trigger_event);
       uv_queue_work(local->loop, &local->request, milter_worker, milter_cleanup);
       ok = true;
     }
@@ -232,53 +434,22 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
 
   if (ok)
   {
-    Local<Object> obj = Object::New(isolate);
+    //Local<Object> obj = Object::New(isolate);
 
-    //obj->Set(String::NewFromUtf8(isolate, "connect"), );
+    //obj->Set(String::NewFromUtf8(isolate, "connect", String::kInternalizedString), );
 
-    Persistent<Object, CopyablePersistentTraits<Object> > pobj (isolate, obj);
+    local->event_context.Reset(isolate, args.This());
 
-    local->events = pobj;
-
-    args.GetReturnValue().Set(obj);
+    //args.GetReturnValue().Set(obj);
   }
-  // TODO: if not ok, send error number and description somewhere
-  //       or put them in an object and return it, or throw an exception
-}
-
-
-/**
- */
-int cb_connect (Handle<Object> context, const char *host)
-{
-  Isolate *isolate = Isolate::GetCurrent();
-  const unsigned argc = 1;
-  Local<Value> argv[argc] = {
-    String::NewFromUtf8(isolate, host)
-  };
-  TryCatch tc;
-  fprintf(stderr, "cb_connect precall\n");
-  Handle<Value> h = node::MakeCallback(isolate, context, "connect", argc, argv);
-  fprintf(stderr, "cb_connect postcall\n");
-  if (tc.HasCaught())
+  else
   {
-    fprintf(stderr, "cb_connect exception\n");
-    FatalException(tc);
-    return SMFIS_TEMPFAIL;
-  }
+    pthread_mutex_destroy(&local->lck_queue);
 
-  if (h->IsNumber())
-  {
-    fprintf(stderr, "cb_connect retval\n");
-    Local<Number> n = h->ToNumber();
-    return n->IntegerValue();
+    // TODO: if not ok, send error number and description somewhere
+    //       or put them in an object and return it, or throw an exception
   }
-
-  // TODO: throw exception
-  fprintf(stderr, "cb_connect tempfail\n");
-  return SMFIS_TEMPFAIL;
 }
-
 
 
 /**

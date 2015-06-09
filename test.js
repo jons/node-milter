@@ -1,14 +1,18 @@
 var milter = require('./build/Release/milter');
 
 
-function connect (host)
-{
-  console.log("connect");
-  console.log(host);
-  return milter.SMFIS_CONTINUE;
-}
-
 process.on('uncaughtException', function (e) { console.log(e); });
 
+var ok = milter.start("inet:12345");
+
+milter.connect = function (host, address)
+{
+  console.log("node.js! connect");
+  console.log(host);
+  console.log(address);
+  return 1357;
+  //return milter.SMFIS_CONTINUE;
+};
+
+console.log(ok);
 console.log(milter);
-console.log(milter.start("inet:12345"));
