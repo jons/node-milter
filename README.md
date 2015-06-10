@@ -11,3 +11,10 @@ models and/or architecture are fundamentally at odds, and that if this module or
 anything like it works at all, then it's probably a hideous and disgusting mess.
 
 :)
+
+ANOMALIES
+
+sources implicitly depend on pthreads: you can't use this on any non-POSIX
+platforms yet. but then again, you can't use milters there, either. this cannot
+be worked around by switching the relevant code to libuv unless libmilter is
+simply already done, and with pthreads. it would have to be rewritten.

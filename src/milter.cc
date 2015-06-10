@@ -7,49 +7,23 @@
 #include <node.h>
 #include <v8.h>
 #include <arpa/inet.h>
-
 #include "libmilter/mfapi.h"
+#include "forward.h"
+#include "events.h"
 
 using namespace v8;
 using namespace node;
 
-typedef struct bindings bindings_t;
-typedef struct testevent testevent_t;
 
-struct bindings
-{
-  uv_loop_t *loop;
-  uv_work_t request;
-  uv_async_t trigger;
-
-  pthread_mutex_t lck_queue;
-  testevent_t *first, *last;
-
-  //Persistent<Object, CopyablePersistentTraits<Object> > event_context;
-  Persistent<Object> event_context;
-
-  int retval;
-};
-
-
-struct testevent
-{
-  testevent_t *next;
-
-  pthread_mutex_t lock;
-  pthread_cond_t ready;
-  int is_done;
-  int fi_retval;
-
-  char h[1024];
-  char s[INET6_ADDRSTRLEN+1];
-};
-
+/** globals *******************************************************************/
 
 
 static const char *g_name = "node-bindings";
 
 static int g_flags = SMFIF_QUARANTINE;
+
+
+/** helpers********************************************************************/
 
 
 /**
@@ -64,9 +38,8 @@ void queue_init (bindings_t *local)
 
 /**
  */
-void queue_e (bindings_t *local, testevent_t *ev)
+void queue_e (bindings_t *local, MilterEvent *ev)
 {
-  ev->next = NULL;
   if (NULL == local->last)
   {
     local->first = ev;
@@ -74,7 +47,7 @@ void queue_e (bindings_t *local, testevent_t *ev)
   }
   else
   {
-    local->last->next = ev;
+    local->last->Append(ev);
     local->last = ev;
   }
 }
@@ -82,102 +55,67 @@ void queue_e (bindings_t *local, testevent_t *ev)
 
 /**
  */
-testevent_t *queue_d (bindings_t *local)
+MilterEvent *queue_d (bindings_t *local)
 {
-  testevent_t *ev = local->first;
+  MilterEvent *ev = local->first;
   if (NULL != ev)
   {
     if (local->last == local->first)
       local->last = NULL;
-    local->first = ev->next;
-    ev->next = NULL;
+    local->first = ev->Next();
+    ev->Detatch();
   }
   return ev;
 }
 
 
-/**
- */
-int fe_connect (Isolate *isolate, Handle<Object> context, const char *host, const char *address)
-{
-  const unsigned argc = 2;
-  Local<Value> argv[argc] = {
-    String::NewFromUtf8(isolate, host),
-    String::NewFromUtf8(isolate, address)
-  };
-  TryCatch tc;
-  fprintf(stderr, "fe_connect precall\n");
-  Handle<Value> h = node::MakeCallback(isolate, context, "connect", argc, argv);
-  fprintf(stderr, "fe_connect postcall\n");
-  if (tc.HasCaught())
-  {
-    fprintf(stderr, "fe_connect exception\n");
-    FatalException(tc);
-    return SMFIS_TEMPFAIL;
-  }
-
-  if (h->IsNumber())
-  {
-    fprintf(stderr, "fe_connect retval\n");
-    Local<Number> n = h->ToNumber();
-    return n->IntegerValue();
-  }
-
-  // TODO: throw exception
-  fprintf(stderr, "fe_connect tempfail\n");
-  return SMFIS_TEMPFAIL;
-}
-
+/** multiplexer ***************************************************************/
 
 
 /**
- * event multiplexer.
- *
  * all queued events reach node.js from this point.
- *
  */
 void trigger_event (uv_async_t *h)
 {
   bindings *local = (bindings *)h->data;
   Isolate *isolate = Isolate::GetCurrent();
   HandleScope scope (isolate);
-  testevent_t *ev;
+  MilterEvent *ev;
 
   fprintf(stderr, "trigger_event local=%p\n", local);
 
   // grab the queue lock
-  pthread_mutex_lock(&local->lck_queue);
-
-  fprintf(stderr, "trigger_event queue locked\n");
-
-  // drain events off of queue and deliver them to node.js
-  ev = queue_d(local);
-
+  // dequeue one event
   // relinquish the queue lock
+  pthread_mutex_lock(&local->lck_queue);
+  fprintf(stderr, "trigger_event queue locked\n");
+  ev = queue_d(local);
   pthread_mutex_unlock(&local->lck_queue);
 
   fprintf(stderr, "trigger_event event %p\n", ev);
-
-  if (NULL != ev)
+  if (NULL == ev)
   {
-    // grab event lock
-    pthread_mutex_lock(&ev->lock);
-
-    fprintf(stderr, "trigger_event event locked\n");
-
-    Local<Object> context = Local<Object>::New(isolate, local->event_context);
-
-    // launch the appropriate node.js callback for the given event
-    ev->fi_retval = fe_connect(isolate, context, ev->h, ev->s);
-
-    // complete the work
-    ev->is_done = 1;
-
-    // signal the waiting milter worker thread
-    // that thread is still responsible for the event heap memory
-    pthread_cond_signal(&ev->ready);
-    pthread_mutex_unlock(&ev->lock);
+    // TODO: more debugging information
+    fprintf(stderr, "spurious wakeup\n");
+    return;
   }
+
+  ev->Lock();
+  // TODO: return value must be zero for success
+  fprintf(stderr, "trigger_event got event lock\n");
+
+  Local<Object> context = Local<Object>::New(isolate, local->event_context);
+
+  // launch the appropriate node.js callback for the given event
+  ev->Fire(isolate, context);
+
+  // complete the work
+  // signal the waiting milter worker thread
+  // that thread is still responsible for the event heap memory
+  ev->Done();
+
+  // TODO: check return value of Done() from pthread_cond_signal
+  ev->Unlock();
 }
 
 
@@ -186,16 +124,16 @@ void trigger_event (uv_async_t *h)
 sfsistat fi_connect (SMFICTX *context, char *host, _SOCK_ADDR *sa)
 {
   bindings_t *local = (bindings_t *)smfi_getpriv(context);
+  envelope_t *env = new envelope_t(local);
   int retval;
 
+  // link future events to the same envelope
+  smfi_setpriv(context, env);
+
   // create connect event
-  testevent *event = new testevent();
-  event->is_done = 0;
-  pthread_mutex_init(&event->lock, NULL);
-  pthread_cond_init(&event->ready, NULL);
-  memcpy(event->h, host, strlen(host)+1);
-  inet_ntop(AF_INET, &((sockaddr_in *)sa)->sin_addr, event->s, sizeof event->s);
-  fprintf(stderr, "connect %p \"%s\" \"%s\"\n", &event->lock, event->h, event->s);
+  MilterConnect *event = new MilterConnect(env, host, (sockaddr_in *)sa);
+
+  fprintf(stderr, "connect \"%s\" \"%s\"\n", event->Host(), event->Address());
 
   // lock the queue
   if (pthread_mutex_lock(&local->lck_queue))
@@ -206,7 +144,7 @@ sfsistat fi_connect (SMFICTX *context, char *host, _SOCK_ADDR *sa)
   }
 
   // lock the event
-  if (pthread_mutex_lock(&event->lock))
+  if (!event->Lock())
   {
     delete event;
     pthread_mutex_unlock(&local->lck_queue);
@@ -228,17 +166,15 @@ sfsistat fi_connect (SMFICTX *context, char *host, _SOCK_ADDR *sa)
     uv_async_send(&local->trigger);
 
     // wait on the event's return condition
-    pthread_cond_wait(&event->ready, &event->lock);
-    if (event->is_done) break;
+    event->Wait();
+    if (event->IsDone()) break;
     fprintf(stderr, "node-milter: incomplete task\n");
   }
   // retrieve return code
-  retval = event->fi_retval;
+  retval = event->Result();
 
   // destroy event
-  pthread_mutex_unlock(&event->lock);
-  pthread_cond_destroy(&event->ready);
-  pthread_mutex_destroy(&event->lock);
+  event->Unlock();
   delete event;
 
   // remember this is a unique _pthread_ from libmilter, NOT a libuv or node thread!
@@ -247,6 +183,8 @@ sfsistat fi_connect (SMFICTX *context, char *host, _SOCK_ADDR *sa)
 }
 
 
+/**
+ */
 sfsistat fi_negotiate (SMFICTX *context,
                            unsigned long a,
                            unsigned long b,
@@ -261,69 +199,108 @@ sfsistat fi_negotiate (SMFICTX *context,
   return SMFIS_CONTINUE;
 }
 
+
+/**
+ */
 sfsistat fi_unknown (SMFICTX *context, const char *command)
 {
   fprintf(stderr, "unknown \"%s\"\n", command);
   return SMFIS_CONTINUE;
 }
 
+
+/**
+ */
 sfsistat fi_helo (SMFICTX *context, char *helo)
 {
   fprintf(stderr, "helo \"%s\"\n", helo);
   return SMFIS_CONTINUE;
 }
 
+
+/**
+ */
 sfsistat fi_envfrom (SMFICTX *context, char **argv)
 {
   fprintf(stderr, "envfrom \"%s\"\n", argv[0]);
   return SMFIS_CONTINUE;
 }
 
+
+/**
+ */
 sfsistat fi_envrcpt (SMFICTX *context, char **argv)
 {
   fprintf(stderr, "envrcpt \"%s\"\n", argv[0]);
   return SMFIS_CONTINUE;
 }
 
+
+/**
+ */
 sfsistat fi_data (SMFICTX *context)
 {
   fprintf(stderr, "data\n");
   return SMFIS_CONTINUE;
 }
 
+
+/**
+ */
 sfsistat fi_header (SMFICTX *context, char *name, char *value)
 {
   fprintf(stderr, "header\n");
   return SMFIS_CONTINUE;
 }
 
+
+/**
+ */
 sfsistat fi_eoh (SMFICTX *context)
 {
   fprintf(stderr, "eoh\n");
   return SMFIS_CONTINUE;
 }
 
+
+/**
+ */
 sfsistat fi_body (SMFICTX *context, unsigned char *body, size_t len)
 {
   fprintf(stderr, "body\n");
   return SMFIS_CONTINUE;
 }
 
+
+/**
+ */
 sfsistat fi_eom (SMFICTX *context)
 {
   fprintf(stderr, "eom\n");
   return SMFIS_CONTINUE;
 }
 
+
+/**
+ */
 sfsistat fi_abort (SMFICTX *context)
 {
+  envelope_t *env = (envelope_t *)smfi_getpriv(context);
   fprintf(stderr, "abort\n");
+
+  delete env;
   return SMFIS_CONTINUE;
 }
 
+
+/**
+ */
 sfsistat fi_close (SMFICTX *context)
 {
+  envelope_t *env = (envelope_t *)smfi_getpriv(context);
   fprintf(stderr, "close\n");
+
+  delete env;
   return SMFIS_CONTINUE;
 }
 
