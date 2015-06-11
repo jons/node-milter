@@ -448,7 +448,7 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
   }
   // ya dats lazy
   for (int i = 1; i < 13; i++)
-    if (!args[1]->IsFunction())
+    if (!args[i]->IsFunction())
     {
       isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Invalid argument: expected function")));
       return;
