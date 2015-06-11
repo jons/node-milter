@@ -288,7 +288,6 @@ sfsistat fi_abort (SMFICTX *context)
   envelope_t *env = (envelope_t *)smfi_getpriv(context);
   fprintf(stderr, "abort\n");
 
-  delete env;
   return SMFIS_CONTINUE;
 }
 
@@ -301,6 +300,7 @@ sfsistat fi_close (SMFICTX *context)
   fprintf(stderr, "close\n");
 
   delete env;
+  smfi_setpriv(context, NULL);
   return SMFIS_CONTINUE;
 }
 
