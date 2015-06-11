@@ -1,51 +1,57 @@
+var crypto = require('crypto');
 var milter = require('./build/Release/milter');
 
 process.on('uncaughtException', function (e) { console.log(e); });
 
 
+/**
+ */
 function connect (envelope, host, address)
 {
-  console.log("*** connect");
-  console.log("***", envelope);
-  console.log("***", host);
-  console.log("***", address);
+  envelope.ts_start = (new Date).getTime();
+  envelope.sid = crypto.randomBytes(2).toString('hex');
+
+  console.log("[" + envelope.sid + "] connection from " + host + " (" + address + ")");
   return milter.SMFIS_CONTINUE;
 }
 
-function unknown (envelope, command)
-{
-  console.log("*** unknown");
-  console.log("***", envelope);
-  console.log("***", command);
-  return milter.SMFIS_CONTINUE;
-}
 
+/**
+ */
 function helo (envelope, identity)
 {
-  console.log("*** helo");
-  console.log("***", envelope);
-  console.log("***", identity);
+  console.log("[" + envelope.sid + "] helo " + identity);
   return milter.SMFIS_CONTINUE;
 }
 
-function mailfrom () { return milter.SMFIS_CONTINUE; }
-function rcptto () { return milter.SMFIS_CONTINUE; }
-function mstart () { return milter.SMFIS_CONTINUE; }
-function header () { return milter.SMFIS_CONTINUE; }
-function eoh () { return milter.SMFIS_CONTINUE; }
-function segment () { return milter.SMFIS_CONTINUE; }
-function mfinish () { return milter.SMFIS_CONTINUE; }
-function abort () { return milter.SMFIS_CONTINUE; }
 
+//
+function unknown ()  { return milter.SMFIS_CONTINUE; }
+function mailfrom () { return milter.SMFIS_CONTINUE; }
+function rcptto ()   { return milter.SMFIS_CONTINUE; }
+function mstart ()   { return milter.SMFIS_CONTINUE; }
+function header ()   { return milter.SMFIS_CONTINUE; }
+function eoh ()      { return milter.SMFIS_CONTINUE; }
+function segment ()  { return milter.SMFIS_CONTINUE; }
+function mfinish ()  { return milter.SMFIS_CONTINUE; }
+function abort ()    { return milter.SMFIS_CONTINUE; }
+
+
+/**
+ */
 function close (envelope)
 {
-  console.log("*** close");
-  console.log("***", envelope);
+  var now = (new Date).getTime();
+  console.log("[" + envelope.sid + "] connection closed");
+  console.log("[" + envelope.sid + "] session lasted " + (now - envelope.ts_start) + " msec");
   return milter.SMFIS_CONTINUE;
 }
 
+
+/** main **********************************************************************/
+
 var ok = milter.start(
-  "inet:12345", // see postconf manual on smtpd_milters for details
+  "inet:12345", // see postconf(5) "smtpd_milters" for details
   connect,  // connection event
   unknown,  // unknown client command
   helo,     // client "HELO" or "EHLO" i presume
@@ -59,4 +65,4 @@ var ok = milter.start(
   abort,    // ?
   close);   // connection event
 
-console.log(ok);
+console.log("milter.start:", ok);

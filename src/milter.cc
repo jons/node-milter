@@ -37,13 +37,10 @@ void trigger_event (uv_async_t *h)
   HandleScope scope (isolate);
   MilterEvent *ev;
 
-  fprintf(stderr, "trigger_event local=%p\n", local);
-
   // grab the queue lock
   // dequeue one event
   // relinquish the queue lock
   pthread_mutex_lock(&local->lck_queue);
-  fprintf(stderr, "trigger_event queue locked\n");
   ev = local->first;
   if (NULL != ev)
   {
@@ -54,7 +51,6 @@ void trigger_event (uv_async_t *h)
   }
   pthread_mutex_unlock(&local->lck_queue);
 
-  fprintf(stderr, "trigger_event event %p\n", ev);
   if (NULL == ev)
   {
     // TODO: more debugging information
@@ -64,7 +60,6 @@ void trigger_event (uv_async_t *h)
 
   ev->Lock();
   // TODO: return value must be zero for success
-  fprintf(stderr, "trigger_event got event lock\n");
 
   // launch the appropriate node.js callback for the given event
   ev->Fire(isolate, local);
@@ -181,7 +176,9 @@ sfsistat fi_connect (SMFICTX *context, char *host, _SOCK_ADDR *sa)
 
   // create event, deliver event, block, cleanup
   MilterConnect *event = new MilterConnect(env, host, (sockaddr_in *)sa);
+#ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "connect \"%s\" \"%s\"\n", event->Host(), event->Address());
+#endif
   retval = generate_event(local, event);
   delete event;
   return retval;
@@ -196,7 +193,9 @@ sfsistat fi_unknown (SMFICTX *context, const char *command)
   bindings_t *local = env->local;
   int retval;
   MilterUnknown *event = new MilterUnknown(env, command);
+#ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "unknown \"%s\"\n", command);
+#endif
   retval = generate_event(local, event);
   delete event;
   return retval;
@@ -211,7 +210,9 @@ sfsistat fi_helo (SMFICTX *context, char *helo)
   bindings_t *local = env->local;
   int retval;
   MilterHELO *event = new MilterHELO(env, helo);
+#ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "helo \"%s\"\n", helo);
+#endif
   retval = generate_event(local, event);
   delete event;
   return retval;
@@ -227,7 +228,9 @@ sfsistat fi_envfrom (SMFICTX *context, char **argv)
   bindings_t *local = env->local;
   int retval;
   MilterMAILFROM *event = new MilterMAILFROM(env, argv);
+#ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "envfrom \"%s\"\n", argv[0]); // argv[0] is guaranteed
+#endif
   retval = generate_event(local, event);
   delete event;
   return retval;
@@ -243,7 +246,9 @@ sfsistat fi_envrcpt (SMFICTX *context, char **argv)
   bindings_t *local = env->local;
   int retval;
   MilterRCPTTO *event = new MilterRCPTTO(env, argv);
+#ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "envrcpt \"%s\"\n", argv[0]); // argv[0] is guaranteed
+#endif
   retval = generate_event(local, event);
   delete event;
   return retval;
@@ -259,7 +264,9 @@ sfsistat fi_data (SMFICTX *context)
   bindings_t *local = env->local;
   int retval;
   MilterDATA *event = new MilterDATA(env);
+#ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "data\n");
+#endif
   retval = generate_event(local, event);
   delete event;
   return retval;
@@ -275,7 +282,9 @@ sfsistat fi_header (SMFICTX *context, char *name, char *value)
   bindings_t *local = env->local;
   int retval;
   MilterHeader *event = new MilterHeader(env, name, value);
-  //fprintf(stderr, "header \"%s\" \"%s\"\n", name, value);
+#ifdef DEBUG_MILTEREVENT
+  fprintf(stderr, "header \"%s\" \"%s\"\n", name, value);
+#endif
   retval = generate_event(local, event);
   delete event;
   return retval;
@@ -291,7 +300,9 @@ sfsistat fi_eoh (SMFICTX *context)
   bindings_t *local = env->local;
   int retval;
   MilterEndHeaders *event = new MilterEndHeaders(env);
+#ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "eoh\n");
+#endif
   retval = generate_event(local, event);
   delete event;
   return retval;
@@ -308,7 +319,9 @@ sfsistat fi_body (SMFICTX *context, unsigned char *segment, size_t len)
   bindings_t *local = env->local;
   int retval;
   MilterMessageData *event = new MilterMessageData(env, segment, len);
+#ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "message-data (%lu bytes)\n", len);
+#endif
   retval = generate_event(local, event);
   delete event;
   return retval;
@@ -324,7 +337,9 @@ sfsistat fi_eom (SMFICTX *context)
   bindings_t *local = env->local;
   int retval;
   MilterEndMessage *event = new MilterEndMessage(env);
+#ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "eom\n");
+#endif
   retval = generate_event(local, event);
   delete event;
   return retval;
@@ -343,7 +358,9 @@ sfsistat fi_abort (SMFICTX *context)
   bindings_t *local = env->local;
   int retval;
   MilterAbort *event = new MilterAbort(env);
+#ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "abort\n");
+#endif
   retval = generate_event(local, event);
   delete event;
   return retval;
@@ -359,7 +376,9 @@ sfsistat fi_close (SMFICTX *context)
   int retval;
 
   MilterClose *event = new MilterClose(env);
+#ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "close\n");
+#endif
   retval = generate_event(local, event);
   delete event;
 
@@ -502,14 +521,15 @@ void init (Handle<Object> target)
 {
   Isolate *isolate = Isolate::GetCurrent();
 
-  target->Set(String::NewFromUtf8(isolate, "SMFIS_CONTINUE"), Number::New(isolate, SMFIS_CONTINUE));
-  target->Set(String::NewFromUtf8(isolate, "SMFIS_REJECT"),   Number::New(isolate, SMFIS_REJECT));
-  target->Set(String::NewFromUtf8(isolate, "SMFIS_DISCARD"),  Number::New(isolate, SMFIS_DISCARD));
-  target->Set(String::NewFromUtf8(isolate, "SMFIS_ACCEPT"),   Number::New(isolate, SMFIS_ACCEPT));
-  target->Set(String::NewFromUtf8(isolate, "SMFIS_TEMPFAIL"), Number::New(isolate, SMFIS_TEMPFAIL));
-  target->Set(String::NewFromUtf8(isolate, "SMFIS_NOREPLY"),  Number::New(isolate, SMFIS_NOREPLY));
-  target->Set(String::NewFromUtf8(isolate, "SMFIS_SKIP"),     Number::New(isolate, SMFIS_SKIP));
-  target->Set(String::NewFromUtf8(isolate, "SMFIS_ALL_OPTS"), Number::New(isolate, SMFIS_ALL_OPTS));
+  target->Set(String::NewFromUtf8(isolate, "SMFIS_CONTINUE", String::kInternalizedString), Number::New(isolate, SMFIS_CONTINUE));
+  target->Set(String::NewFromUtf8(isolate, "SMFIS_REJECT",   String::kInternalizedString), Number::New(isolate, SMFIS_REJECT));
+  target->Set(String::NewFromUtf8(isolate, "SMFIS_DISCARD",  String::kInternalizedString), Number::New(isolate, SMFIS_DISCARD));
+  target->Set(String::NewFromUtf8(isolate, "SMFIS_ACCEPT",   String::kInternalizedString), Number::New(isolate, SMFIS_ACCEPT));
+  target->Set(String::NewFromUtf8(isolate, "SMFIS_TEMPFAIL", String::kInternalizedString), Number::New(isolate, SMFIS_TEMPFAIL));
+  target->Set(String::NewFromUtf8(isolate, "SMFIS_NOREPLY",  String::kInternalizedString), Number::New(isolate, SMFIS_NOREPLY));
+  target->Set(String::NewFromUtf8(isolate, "SMFIS_SKIP",     String::kInternalizedString), Number::New(isolate, SMFIS_SKIP));
+  // TODO: implement negotiate, otherwise this isn't needed
+  //target->Set(String::NewFromUtf8(isolate, "SMFIS_ALL_OPTS", String::kInternalizedString), Number::New(isolate, SMFIS_ALL_OPTS));
 
   NODE_SET_METHOD(target, "start", milter_start);
 }
