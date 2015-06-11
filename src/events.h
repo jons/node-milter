@@ -75,8 +75,7 @@ class MilterEvent
      * shared wrapper for Fire() implementors
      * all events are triggered in the same manner
      */
-    Handle<Value> EventWrap (Isolate *isolate, Handle<Object> &context, const char *ev_name, unsigned int argc, Local<Value> *argv);
-    Handle<Value> EventWrap (Isolate *isolate, Local<Function> &fcall, unsigned int argc, Local<Value> *argv);
+    Handle<Value> EventWrap (Isolate *isolate, Persistent<Function> &pfunc, unsigned int argc, Local<Value> *argv);
 
 
   private:
@@ -114,6 +113,126 @@ class MilterConnect : public MilterEvent
   private:
     const char *sz_host;
     char sz_addr[INET6_ADDRSTRLEN+1];
+};
+
+
+/**
+ */
+class MilterUnknown : public MilterEvent
+{
+  public:
+    MilterUnknown (envelope_t *env, const char *command);
+    void Fire (Isolate *isolate, bindings_t *local);
+
+  private:
+    const char *sz_command;
+};
+
+
+/**
+ */
+class MilterHELO : public MilterEvent
+{
+  public:
+    MilterHELO (envelope_t *env, const char *helo);
+    void Fire (Isolate *isolate, bindings_t *local);
+
+  private:
+    const char *sz_helo;
+};
+
+
+/**
+ */
+class MilterMAILFROM : public MilterEvent
+{
+  public:
+    MilterMAILFROM (envelope_t *env, char **argv);
+    void Fire (Isolate *isolate, bindings_t *local);
+
+  private:
+    char **szpp_argv;
+};
+
+
+/**
+ */
+class MilterRCPTTO : public MilterEvent
+{
+  public:
+    MilterRCPTTO (envelope_t *env, char **argv);
+    void Fire (Isolate *isolate, bindings_t *local);
+
+  private:
+    char **szpp_argv;
+};
+
+
+/**
+ */
+class MilterDATA : public MilterEvent
+{
+  public:
+    MilterDATA (envelope_t *env);
+    void Fire (Isolate *isolate, bindings_t *local);
+};
+
+
+/**
+ */
+class MilterHeader : public MilterEvent
+{
+  public:
+    MilterHeader (envelope_t *env, const char *name, const char *value);
+    void Fire (Isolate *isolate, bindings_t *local);
+
+  private:
+    const char *sz_name;
+    const char *sz_value;
+};
+
+
+/**
+ */
+class MilterEndHeaders : public MilterEvent
+{
+  public:
+    MilterEndHeaders (envelope_t *env);
+    void Fire (Isolate *isolate, bindings_t *local);
+};
+
+
+/**
+ */
+class MilterMessageData : public MilterEvent
+{
+  public:
+    MilterMessageData (envelope_t *env, const unsigned char *buf, const size_t len);
+    void Fire (Isolate *isolate, bindings_t *local);
+
+  private:
+    const unsigned char *buf;
+    const size_t len;
+};
+
+
+/**
+ */
+class MilterEndMessage : public MilterEvent
+{
+  public:
+    MilterEndMessage (envelope_t *env);
+    void Fire (Isolate *isolate, bindings_t *local);
+};
+
+
+/**
+ */
+class MilterAbort : public MilterEvent
+{
+  public:
+    MilterAbort (envelope_t *env);
+    void Fire (Isolate *isolate, bindings_t *local);
 };
 
 
