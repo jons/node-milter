@@ -30,7 +30,8 @@ class MilterEvent
 {
   public:
     // do the event work
-    virtual void Fire (Isolate *isolate, Handle<Object> &context) = 0;
+    //virtual void Fire (Isolate *isolate, Handle<Object> &context) = 0;
+    virtual void Fire (Isolate *isolate, bindings_t *local) = 0;
 
     // take control of the event
     bool Lock ();
@@ -66,15 +67,16 @@ class MilterEvent
     void SetResult (int retval);
 
     /**
-     * must be called in trigger_event on connect (or negotiate. hmm)
      */
-    Local<Value> CreateEnvelope (Isolate *isolate);
+    Local<Object> CreateEnvelope (Isolate *isolate);
+    Local<Object> RestoreEnvelope (Isolate *isolate);
 
     /**
      * shared wrapper for Fire() implementors
      * all events are triggered in the same manner
      */
     Handle<Value> EventWrap (Isolate *isolate, Handle<Object> &context, const char *ev_name, unsigned int argc, Local<Value> *argv);
+    Handle<Value> EventWrap (Isolate *isolate, Local<Function> &fcall, unsigned int argc, Local<Value> *argv);
 
 
   private:
@@ -103,7 +105,8 @@ class MilterConnect : public MilterEvent
     /**
      * fire connect event
      */
-    void Fire (Isolate *isolate, Handle<Object> &context);
+    //void Fire (Isolate *isolate, Handle<Object> &context);
+    void Fire (Isolate *isolate, bindings_t *local);
 
     const char *Host() const;
     const char *Address() const;
@@ -111,6 +114,16 @@ class MilterConnect : public MilterEvent
   private:
     const char *sz_host;
     char sz_addr[INET6_ADDRSTRLEN+1];
+};
+
+
+/**
+ */
+class MilterClose : public MilterEvent
+{
+  public:
+    MilterClose (envelope_t *env);
+    void Fire (Isolate *isolate, bindings_t *local);
 };
 
 

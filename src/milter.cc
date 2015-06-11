@@ -28,16 +28,6 @@ static int g_flags = SMFIF_QUARANTINE;
 
 /**
  */
-void queue_init (bindings_t *local)
-{
-  pthread_mutex_init(&local->lck_queue, NULL);
-  local->first = NULL;
-  local->last = NULL;
-}
-
-
-/**
- */
 void queue_e (bindings_t *local, MilterEvent *ev)
 {
   if (NULL == local->last)
@@ -73,7 +63,8 @@ MilterEvent *queue_d (bindings_t *local)
 
 
 /**
- * all queued events reach node.js from this point.
+ * all queued events reach node.js from this point; this task is queued on the
+ * libuv side, in a loop, via uv_async_send
  */
 void trigger_event (uv_async_t *h)
 {
@@ -104,10 +95,8 @@ void trigger_event (uv_async_t *h)
   // TODO: return value must be zero for success
   fprintf(stderr, "trigger_event got event lock\n");
 
-  Local<Object> context = Local<Object>::New(isolate, local->event_context);
-
   // launch the appropriate node.js callback for the given event
-  ev->Fire(isolate, context);
+  ev->Fire(isolate, local);
 
   // complete the work
   // signal the waiting milter worker thread
@@ -120,25 +109,15 @@ void trigger_event (uv_async_t *h)
 
 
 /**
+ * queue an event from the libmilter side.
  */
-sfsistat fi_connect (SMFICTX *context, char *host, _SOCK_ADDR *sa)
+int generate_event (bindings_t *local, MilterEvent *event)
 {
-  bindings_t *local = (bindings_t *)smfi_getpriv(context);
-  envelope_t *env = new envelope_t(local);
   int retval;
-
-  // link future events to the same envelope
-  smfi_setpriv(context, env);
-
-  // create connect event
-  MilterConnect *event = new MilterConnect(env, host, (sockaddr_in *)sa);
-
-  fprintf(stderr, "connect \"%s\" \"%s\"\n", event->Host(), event->Address());
 
   // lock the queue
   if (pthread_mutex_lock(&local->lck_queue))
   {
-    delete event;
     fprintf(stderr, "node-milter: queue lock failed\n");
     return SMFIS_TEMPFAIL;
   }
@@ -146,7 +125,6 @@ sfsistat fi_connect (SMFICTX *context, char *host, _SOCK_ADDR *sa)
   // lock the event
   if (!event->Lock())
   {
-    delete event;
     pthread_mutex_unlock(&local->lck_queue);
     // TODO: handle error
 
@@ -173,13 +151,33 @@ sfsistat fi_connect (SMFICTX *context, char *host, _SOCK_ADDR *sa)
   // retrieve return code
   retval = event->Result();
 
-  // destroy event
   event->Unlock();
+
+  return retval;
+}
+
+
+/**
+ */
+sfsistat fi_connect (SMFICTX *context, char *host, _SOCK_ADDR *sa)
+{
+  bindings_t *local = (bindings_t *)smfi_getpriv(context);
+  int retval;
+
+  // envelope initializer
+  // links future events in this thread to the same envelope in node.js
+  envelope_t *env = new envelope_t(local);
+  smfi_setpriv(context, env);
+
+  // create event, deliver event, block, cleanup
+  MilterConnect *event = new MilterConnect(env, host, (sockaddr_in *)sa);
+  fprintf(stderr, "connect \"%s\" \"%s\"\n", event->Host(), event->Address());
+  retval = generate_event(local, event);
   delete event;
 
   // remember this is a unique _pthread_ from libmilter, NOT a libuv or node thread!
   fprintf(stderr, "node-milter: connect retval=%d\n", retval);
-  return SMFIS_CONTINUE;
+  return retval;
 }
 
 
@@ -249,7 +247,7 @@ sfsistat fi_data (SMFICTX *context)
  */
 sfsistat fi_header (SMFICTX *context, char *name, char *value)
 {
-  fprintf(stderr, "header\n");
+  //fprintf(stderr, "header\n");
   return SMFIS_CONTINUE;
 }
 
@@ -285,7 +283,6 @@ sfsistat fi_eom (SMFICTX *context)
  */
 sfsistat fi_abort (SMFICTX *context)
 {
-  envelope_t *env = (envelope_t *)smfi_getpriv(context);
   fprintf(stderr, "abort\n");
 
   return SMFIS_CONTINUE;
@@ -297,11 +294,19 @@ sfsistat fi_abort (SMFICTX *context)
 sfsistat fi_close (SMFICTX *context)
 {
   envelope_t *env = (envelope_t *)smfi_getpriv(context);
-  fprintf(stderr, "close\n");
+  bindings_t *local = env->local;
+  int retval;
 
+  MilterClose *event = new MilterClose(env);
+  fprintf(stderr, "close\n");
+  retval = generate_event(local, event);
+  delete event;
+
+  // final teardown sequence
   delete env;
   smfi_setpriv(context, NULL);
-  return SMFIS_CONTINUE;
+
+  return retval;
 }
 
 
@@ -334,9 +339,6 @@ void milter_cleanup (uv_work_t *request, int status)
 
   // TODO: call a "end" callback provided during instantiation? unsure how to do this, probably with a persistent function
 
-  local->event_context.Reset();
-
-  pthread_mutex_destroy(&local->lck_queue);
   delete local;
 }
 
@@ -349,7 +351,6 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
   Isolate *isolate = Isolate::GetCurrent();
   HandleScope scope(isolate);
   struct smfiDesc desc;
-  int r;
 
   desc.xxfi_name      =(char *)g_name;
   desc.xxfi_version   = SMFI_VERSION;
@@ -376,7 +377,7 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
   local->request.data = local;
   local->trigger.data = local;
 
-  if (args.Length() < 1)
+  if (args.Length() < 2)
   {
     isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Wrong number of arguments")));
     return;
@@ -388,18 +389,29 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
     return;
   }
 
-  queue_init(local);
+  if (!args[1]->IsFunction())
+  {
+    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "First argument: expected function(env,host,addr)")));
+    return;
+  }
+
+  if (!args[2]->IsFunction())
+  {
+    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "First argument: expected function(env)")));
+    return;
+  }
 
   Local<String> connstr = args[0]->ToString();
   char *c_connstr = new char[connstr->Utf8Length()+1];
   connstr->WriteUtf8(c_connstr);
   bool ok = false;
 
-  r = smfi_register(desc);
-  if (MI_SUCCESS == r)
+  local->fcall.connect.Reset(isolate, Local<Function>::Cast(args[1]));
+  local->fcall.close.Reset(isolate, Local<Function>::Cast(args[2]));
+
+  if (MI_SUCCESS == smfi_register(desc))
   {
-    r = smfi_setconn(c_connstr);
-    if (MI_SUCCESS == r)
+    if (MI_SUCCESS == smfi_setconn(c_connstr))
     {
       local->loop = uv_default_loop();
       uv_async_init(local->loop, &local->trigger, trigger_event);
@@ -409,23 +421,14 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
   }
   delete c_connstr;
 
-  if (ok)
+  if (!ok)
   {
-    //Local<Object> obj = Object::New(isolate);
+    delete local;
 
-    //obj->Set(String::NewFromUtf8(isolate, "connect", String::kInternalizedString), );
-
-    local->event_context.Reset(isolate, args.This());
-
-    //args.GetReturnValue().Set(obj);
+    // TODO: throw exception? report error?
   }
-  else
-  {
-    pthread_mutex_destroy(&local->lck_queue);
 
-    // TODO: if not ok, send error number and description somewhere
-    //       or put them in an object and return it, or throw an exception
-  }
+  args.GetReturnValue().Set(Boolean::New(isolate, ok));
 }
 
 

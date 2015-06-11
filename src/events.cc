@@ -77,18 +77,29 @@ void MilterEvent::SetResult (int retval)
 }
 
 /**
- * must be called in trigger_event on connect (or negotiate. hmm)
+ * must be called during trigger_event
+ * create new envelope on connect... or negotiate. hmm
  */
-Local<Value> MilterEvent::CreateEnvelope (Isolate *isolate)
+Local<Object> MilterEvent::CreateEnvelope (Isolate *isolate)
 {
-      char debugenv[1024] = {'\0'};
-      Local<Object> object = Object::New(isolate);
-      this->fi_envelope->object.Reset(isolate, object);
-      // TODO: add relevant and meaningful contextual information
-      snprintf(debugenv, sizeof(debugenv)-1, "%p", this->fi_envelope);
-      object->Set(String::NewFromUtf8(isolate, "debugenv", String::kInternalizedString), String::NewFromUtf8(isolate, debugenv));
-      return object;
-    }
+  char debugenv[1024] = {'\0'};
+  Local<Object> object = Object::New(isolate);
+  this->fi_envelope->object.Reset(isolate, object);
+  // TODO: add relevant and meaningful contextual information
+  snprintf(debugenv, sizeof(debugenv)-1, "%p", this->fi_envelope);
+  object->Set(String::NewFromUtf8(isolate, "debugenv", String::kInternalizedString), String::NewFromUtf8(isolate, debugenv));
+  return object;
+}
+
+/**
+ * must be called during trigger_event
+ * restore existing object for session
+ */
+Local<Object> MilterEvent::RestoreEnvelope (Isolate *isolate)
+{
+  return Local<Object>::New(isolate, this->fi_envelope->object);
+}
+
 
 /**
  * shared wrapper for Fire() implementors
@@ -106,28 +117,46 @@ Handle<Value> MilterEvent::EventWrap (Isolate *isolate, Handle<Object> &context,
       }
       return h;
     }
+Handle<Value> MilterEvent::EventWrap (Isolate *isolate, Local<Function> &fcall, unsigned int argc, Local<Value> *argv)
+{
+      TryCatch tc;
+      Handle<Value> h = fcall->Call(isolate->GetCurrentContext()->Global(), argc, argv);
+      if (tc.HasCaught())
+      {
+        FatalException(tc);
+        // XXX: this value isn't special; it just coaxes the caller into telling libmilter to TEMPFAIL
+        return Undefined(isolate);
+      }
+      return h;
+    }
 
 
+/**
+ * MilterConnect
+ */
 MilterConnect::MilterConnect (envelope_t *env, const char *host, sockaddr_in *sa)
     : MilterEvent(env), sz_host(host)
     {
       inet_ntop(AF_INET, &((sockaddr_in *)sa)->sin_addr, sz_addr, sizeof sz_addr);
     }
 
+
 /**
  * fire connect event
  */
-void MilterConnect::Fire (Isolate *isolate, Handle<Object> &context)
+void MilterConnect::Fire (Isolate *isolate, bindings_t *local)
     {
       const unsigned argc = 3;
       Local<Value> env = this->CreateEnvelope(isolate);
-      //Local<Value> env = Local<Value>::New(isolate, this->envelope);
       Local<Value> argv[argc] = {
         env,
         String::NewFromUtf8(isolate, this->sz_host),
         String::NewFromUtf8(isolate, this->sz_addr)
       };
-      Handle<Value> h = this->EventWrap(isolate, context, "connect", argc, argv);
+      Local<Function> fcall = Local<Function>::New(isolate, local->fcall.connect);
+
+      Handle<Value> h = this->EventWrap(isolate, fcall, argc, argv);
+
       this->SetResult(h->IsNumber() ? h->ToNumber()->IntegerValue() : SMFIS_TEMPFAIL);
     }
 
@@ -135,3 +164,27 @@ const char *MilterConnect::Host() const { return this->sz_host; }
 
 const char *MilterConnect::Address() const { return this->sz_addr; }
 
+
+/**
+ * MilterClose
+ */
+MilterClose::MilterClose (envelope_t *env)
+    : MilterEvent(env)
+{
+}
+
+
+/**
+ * fire close event
+ */
+void MilterClose::Fire (Isolate *isolate, bindings_t *local)
+{
+  const unsigned argc = 1;
+  Local<Value> env = this->RestoreEnvelope(isolate);
+  Local<Value> argv[argc] = {
+    env,
+  };
+  Local<Function> fcall = Local<Function>::New(isolate, local->fcall.close);
+  Handle<Value> h = this->EventWrap(isolate, fcall, argc, argv);
+  this->SetResult(h->IsNumber() ? h->ToNumber()->IntegerValue() : SMFIS_TEMPFAIL);
+}

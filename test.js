@@ -1,18 +1,27 @@
 var milter = require('./build/Release/milter');
 
-
 process.on('uncaughtException', function (e) { console.log(e); });
 
-var ok = milter.start("inet:12345");
-
-milter.connect = function (host, address)
+function connect (envelope, host, address)
 {
-  console.log("node.js! connect");
+  envelope.test = "does this persist?";
+
+  console.log("*** connect");
+  console.log(envelope);
   console.log(host);
   console.log(address);
-  return 1357;
-  //return milter.SMFIS_CONTINUE;
-};
+  console.log("***");
+  return milter.SMFIS_CONTINUE;
+}
 
+function close (envelope)
+{
+  console.log("*** close");
+  console.log(envelope);
+  console.log("***");
+  return milter.SMFIS_CONTINUE;
+}
+
+var ok = milter.start("inet:12345", connect, close);
 console.log(ok);
 console.log(milter);

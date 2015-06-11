@@ -15,6 +15,23 @@ using namespace v8;
 
 struct bindings
 {
+  bindings ()
+  : first(NULL), last(NULL)
+  {
+    // TODO: deal with error case
+    pthread_mutex_init(&lck_queue, NULL);
+  }
+
+  ~bindings ()
+  {
+    // TODO: lock queue, clear it, unlock it
+    // ensure no further events can be delivered
+
+    fcall.connect.Reset();
+    fcall.close.Reset();
+    pthread_mutex_destroy(&lck_queue);
+  }
+
   uv_loop_t *loop;
   uv_work_t request;
   uv_async_t trigger;
@@ -22,8 +39,11 @@ struct bindings
   pthread_mutex_t lck_queue;
   MilterEvent *first, *last;
 
-  //Persistent<Object, CopyablePersistentTraits<Object> > event_context;
-  Persistent<Object> event_context;
+  struct
+  {
+    Persistent<Function> connect;
+    Persistent<Function> close;
+  } fcall;
 
   int retval;
 };
@@ -36,7 +56,7 @@ struct envelope
 
   bindings_t *local;
 
-  Persistent<Value> object;
+  Persistent<Object> object;
 };
 
 #endif
