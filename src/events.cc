@@ -79,7 +79,7 @@ void MilterEvent::SetResult (int retval)
 
 /**
  * must be called during trigger_event
- * create new envelope on connect... or negotiate. hmm
+ * create new envelope on connect... or on negotiate. hmm
  */
 Local<Object> MilterEvent::CreateEnvelope (Isolate *isolate)
 {
@@ -99,6 +99,16 @@ Local<Object> MilterEvent::CreateEnvelope (Isolate *isolate)
 Local<Object> MilterEvent::RestoreEnvelope (Isolate *isolate)
 {
   return Local<Object>::New(isolate, this->fi_envelope->object);
+}
+
+
+/**
+ * must be called during trigger_event
+ * destroy the envelope after xxfi_close is complete
+ */
+void MilterEvent::DestroyEnvelope (Isolate *isolate)
+{
+  this->fi_envelope->object.Reset();
 }
 
 
@@ -334,4 +344,6 @@ void MilterClose::Fire (Isolate *isolate, bindings_t *local)
   };
   Handle<Value> h = this->EventWrap(isolate, local->fcall.close, argc, argv);
   this->SetResult(h->IsNumber() ? h->ToNumber()->IntegerValue() : SMFIS_TEMPFAIL);
+
+  this->DestroyEnvelope(isolate);
 }

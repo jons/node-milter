@@ -70,6 +70,7 @@ class MilterEvent
      */
     Local<Object> CreateEnvelope (Isolate *isolate);
     Local<Object> RestoreEnvelope (Isolate *isolate);
+    void DestroyEnvelope (Isolate *isolate);
 
     /**
      * shared wrapper for Fire() implementors

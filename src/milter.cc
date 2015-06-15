@@ -469,7 +469,7 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
   local->request.data = local;
   local->trigger.data = local;
 
-  if (args.Length() < 2)
+  if (args.Length() < 13)
   {
     isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Wrong number of arguments")));
     return;
@@ -529,12 +529,113 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
 
 
 /**
+ */
+void milter_setbacklog (const FunctionCallbackInfo<Value> &args)
+{
+  Isolate *isolate = Isolate::GetCurrent();
+  HandleScope scope(isolate);
+  if (args.Length() < 1)
+  {
+    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Wrong number of arguments")));
+    return;
+  }
+  if (!args[0]->IsNumber())
+  {
+    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Invalid argument: expected number")));
+    return;
+  }
+  int n = args[0]->ToNumber()->Value();
+  int r = smfi_setbacklog(n);
+  args.GetReturnValue().Set(Number::New(isolate, r));
+}
+
+
+/**
+ */
+void milter_setdbg (const FunctionCallbackInfo<Value> &args)
+{
+  Isolate *isolate = Isolate::GetCurrent();
+  HandleScope scope(isolate);
+  if (args.Length() < 1)
+  {
+    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Wrong number of arguments")));
+    return;
+  }
+  if (!args[0]->IsNumber())
+  {
+    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Invalid argument: expected number")));
+    return;
+  }
+  int f = args[0]->ToNumber()->Value();
+  int r = smfi_setdbg(f);
+  args.GetReturnValue().Set(Number::New(isolate, r));
+}
+
+
+/**
+ */
+void milter_settimeout (const FunctionCallbackInfo<Value> &args)
+{
+  Isolate *isolate = Isolate::GetCurrent();
+  HandleScope scope(isolate);
+  if (args.Length() < 1)
+  {
+    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Wrong number of arguments")));
+    return;
+  }
+  if (!args[0]->IsNumber())
+  {
+    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Invalid argument: expected number")));
+    return;
+  }
+  int timeo = args[0]->ToNumber()->Value();
+  int r = smfi_settimeout(timeo);
+  args.GetReturnValue().Set(Number::New(isolate, r));
+}
+
+
+/**
+ */
+void milter_stop (const FunctionCallbackInfo<Value> &args)
+{
+  Isolate *isolate = Isolate::GetCurrent();
+  HandleScope scope(isolate);
+  int r = smfi_stop();
+  args.GetReturnValue().Set(Number::New(isolate, r));
+}
+
+
+/**
  * module initialization
  */
 void init (Handle<Object> target)
 {
   Isolate *isolate = Isolate::GetCurrent();
 
+  // macro contexts/locations
+  target->Set(String::NewFromUtf8(isolate, "SMFIM_CONNECT", String::kInternalizedString), Number::New(isolate, SMFIM_CONNECT));
+  target->Set(String::NewFromUtf8(isolate, "SMFIM_HELO",    String::kInternalizedString), Number::New(isolate, SMFIM_HELO));
+  target->Set(String::NewFromUtf8(isolate, "SMFIM_ENVFROM", String::kInternalizedString), Number::New(isolate, SMFIM_ENVFROM));
+  target->Set(String::NewFromUtf8(isolate, "SMFIM_ENVRCPT", String::kInternalizedString), Number::New(isolate, SMFIM_ENVRCPT));
+  target->Set(String::NewFromUtf8(isolate, "SMFIM_DATA",    String::kInternalizedString), Number::New(isolate, SMFIM_DATA));
+  target->Set(String::NewFromUtf8(isolate, "SMFIM_EOM",     String::kInternalizedString), Number::New(isolate, SMFIM_EOM));
+  target->Set(String::NewFromUtf8(isolate, "SMFIM_EOH",     String::kInternalizedString), Number::New(isolate, SMFIM_EOH));
+
+
+  // negotiate flags
+  target->Set(String::NewFromUtf8(isolate, "SMFIF_NONE",        String::kInternalizedString), Number::New(isolate, SMFIF_NONE));
+  target->Set(String::NewFromUtf8(isolate, "SMFIF_ADDHDRS",     String::kInternalizedString), Number::New(isolate, SMFIF_ADDHDRS));
+  target->Set(String::NewFromUtf8(isolate, "SMFIF_CHGBODY",     String::kInternalizedString), Number::New(isolate, SMFIF_CHGBODY));
+  target->Set(String::NewFromUtf8(isolate, "SMFIF_MODBODY",     String::kInternalizedString), Number::New(isolate, SMFIF_MODBODY));
+  target->Set(String::NewFromUtf8(isolate, "SMFIF_ADDRCPT",     String::kInternalizedString), Number::New(isolate, SMFIF_ADDRCPT));
+  target->Set(String::NewFromUtf8(isolate, "SMFIF_DELRCPT",     String::kInternalizedString), Number::New(isolate, SMFIF_DELRCPT));
+  target->Set(String::NewFromUtf8(isolate, "SMFIF_CHGHDRS",     String::kInternalizedString), Number::New(isolate, SMFIF_CHGHDRS));
+  target->Set(String::NewFromUtf8(isolate, "SMFIF_QUARANTINE",  String::kInternalizedString), Number::New(isolate, SMFIF_QUARANTINE));
+  target->Set(String::NewFromUtf8(isolate, "SMFIF_CHGFROM",     String::kInternalizedString), Number::New(isolate, SMFIF_CHGFROM));
+  target->Set(String::NewFromUtf8(isolate, "SMFIF_ADDRCPT_PAR", String::kInternalizedString), Number::New(isolate, SMFIF_ADDRCPT_PAR));
+  target->Set(String::NewFromUtf8(isolate, "SMFIF_SETSYMLIST",  String::kInternalizedString), Number::New(isolate, SMFIF_SETSYMLIST));
+
+  // normal callback return values
   target->Set(String::NewFromUtf8(isolate, "SMFIS_CONTINUE", String::kInternalizedString), Number::New(isolate, SMFIS_CONTINUE));
   target->Set(String::NewFromUtf8(isolate, "SMFIS_REJECT",   String::kInternalizedString), Number::New(isolate, SMFIS_REJECT));
   target->Set(String::NewFromUtf8(isolate, "SMFIS_DISCARD",  String::kInternalizedString), Number::New(isolate, SMFIS_DISCARD));
@@ -542,10 +643,15 @@ void init (Handle<Object> target)
   target->Set(String::NewFromUtf8(isolate, "SMFIS_TEMPFAIL", String::kInternalizedString), Number::New(isolate, SMFIS_TEMPFAIL));
   target->Set(String::NewFromUtf8(isolate, "SMFIS_NOREPLY",  String::kInternalizedString), Number::New(isolate, SMFIS_NOREPLY));
   target->Set(String::NewFromUtf8(isolate, "SMFIS_SKIP",     String::kInternalizedString), Number::New(isolate, SMFIS_SKIP));
-  // TODO: implement negotiate, otherwise this isn't needed
-  //target->Set(String::NewFromUtf8(isolate, "SMFIS_ALL_OPTS", String::kInternalizedString), Number::New(isolate, SMFIS_ALL_OPTS));
 
-  NODE_SET_METHOD(target, "start", milter_start);
+  // callback return val for negotiate only
+  target->Set(String::NewFromUtf8(isolate, "SMFIS_ALL_OPTS", String::kInternalizedString), Number::New(isolate, SMFIS_ALL_OPTS));
+
+  NODE_SET_METHOD(target, "start",      milter_start);
+  NODE_SET_METHOD(target, "setbacklog", milter_setbacklog);
+  NODE_SET_METHOD(target, "setdbg",     milter_setdbg);
+  NODE_SET_METHOD(target, "settimeout", milter_settimeout);
+  NODE_SET_METHOD(target, "stop",       milter_stop);
 }
 
 NODE_MODULE(milter, init)
