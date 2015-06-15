@@ -415,6 +415,20 @@ void milter_cleanup (uv_work_t *request, int status)
   // immediately stop event delivery
   uv_close((uv_handle_t *)&local->trigger, NULL);
 
+  //local->fcall.negotiate.Reset();
+  local->fcall.connect.Reset();
+  local->fcall.unknown.Reset();
+  local->fcall.helo.Reset();
+  local->fcall.envfrom.Reset();
+  local->fcall.envrcpt.Reset();
+  local->fcall.data.Reset();
+  local->fcall.header.Reset();
+  local->fcall.eoh.Reset();
+  local->fcall.body.Reset();
+  local->fcall.eom.Reset();
+  local->fcall.abort.Reset();
+  local->fcall.close.Reset();
+
   // TODO: call a "end" callback provided during instantiation? unsure how to do this, probably with a persistent function
 
   delete local;

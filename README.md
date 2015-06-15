@@ -71,3 +71,10 @@ named Buffer::New() like the others, by passing (const unsigned char *) as the
 expected (char *) which is probably stupid. it is unclear to me why there is no
 Buffer::New() that simply accepts (void *) like all the real POSIX C buffer-
 manipulating functions. whatever.
+
+
+ERRATA
+
+this link is gold.
+
+  https://strongloop.com/strongblog/node-js-v0-12-c-apis-breaking/

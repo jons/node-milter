@@ -27,20 +27,6 @@ struct bindings
     // TODO: lock queue, clear it, unlock it
     // ensure no further events can be delivered
 
-    //fcall.negotiate.Reset();
-    fcall.connect.Reset();
-    fcall.unknown.Reset();
-    fcall.helo.Reset();
-    fcall.envfrom.Reset();
-    fcall.envrcpt.Reset();
-    fcall.data.Reset();
-    fcall.header.Reset();
-    fcall.eoh.Reset();
-    fcall.body.Reset();
-    fcall.eom.Reset();
-    fcall.abort.Reset();
-    fcall.close.Reset();
-
     pthread_mutex_destroy(&lck_queue);
   }
 
