@@ -64,10 +64,6 @@ class MilterEvent
 
     /**
      */
-    void SetResult (int retval);
-
-    /**
-     */
     Local<Object> CreateEnvelope (Isolate *isolate);
     Local<Object> RestoreEnvelope (Isolate *isolate);
     void DestroyEnvelope (Isolate *isolate);
@@ -76,7 +72,7 @@ class MilterEvent
      * shared wrapper for Fire() implementors
      * all events are triggered in the same manner
      */
-    Handle<Value> EventWrap (Isolate *isolate, Persistent<Function> &pfunc, unsigned int argc, Local<Value> *argv);
+    void EventWrap (Isolate *isolate, Persistent<Function> &pfunc, unsigned int argc, Local<Value> *argv);
 
 
   private:

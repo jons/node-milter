@@ -69,13 +69,6 @@ int MilterEvent::Result () const { return this->fi_retval; }
   pthread_mutex_destroy(&this->pt_lock);
 }
 
-/**
- */
-void MilterEvent::SetResult (int retval)
-{
-  this->is_done = true;
-  this->fi_retval = retval;
-}
 
 /**
  * must be called during trigger_event
@@ -116,18 +109,23 @@ void MilterEvent::DestroyEnvelope (Isolate *isolate)
  * shared wrapper for Fire() implementors
  * all events are triggered in the same manner
  */
-Handle<Value> MilterEvent::EventWrap (Isolate *isolate, Persistent<Function> &pfunc, unsigned int argc, Local<Value> *argv)
+void MilterEvent::EventWrap (Isolate *isolate, Persistent<Function> &pfunc, unsigned int argc, Local<Value> *argv)
 {
+  this->fi_retval = SMFIS_TEMPFAIL;
+
   TryCatch tc;
   Local<Function> fcall = Local<Function>::New(isolate, pfunc);
   Handle<Value> h = fcall->Call(isolate->GetCurrentContext()->Global(), argc, argv);
+  if (h->IsNumber())
+    this->fi_retval = h->ToNumber()->IntegerValue();
   if (tc.HasCaught())
   {
     FatalException(tc);
     // XXX: this value isn't special; it just coaxes the caller into telling libmilter to TEMPFAIL
-    return Undefined(isolate);
+    return;
   }
-  return h;
+
+  this->is_done = true;
 }
 
 
@@ -148,8 +146,7 @@ void MilterConnect::Fire (Isolate *isolate, bindings_t *local)
     String::NewFromUtf8(isolate, this->sz_host),
     String::NewFromUtf8(isolate, this->sz_addr)
   };
-  Handle<Value> h = this->EventWrap(isolate, local->fcall.connect, argc, argv);
-  this->SetResult(h->IsNumber() ? h->ToNumber()->IntegerValue() : SMFIS_TEMPFAIL);
+  this->EventWrap(isolate, local->fcall.connect, argc, argv);
 }
 
 const char *MilterConnect::Host() const { return this->sz_host; }
@@ -170,8 +167,7 @@ void MilterUnknown::Fire (Isolate *isolate, bindings_t *local)
     env,
     String::NewFromUtf8(isolate, this->sz_command)
   };
-  Handle<Value> h = this->EventWrap(isolate, local->fcall.unknown, argc, argv);
-  this->SetResult(h->IsNumber() ? h->ToNumber()->IntegerValue() : SMFIS_TEMPFAIL);
+  this->EventWrap(isolate, local->fcall.unknown, argc, argv);
 }
 
 
@@ -188,8 +184,7 @@ void MilterHELO::Fire (Isolate *isolate, bindings_t *local)
     env,
     String::NewFromUtf8(isolate, sz_helo)
   };
-  Handle<Value> h = this->EventWrap(isolate, local->fcall.helo, argc, argv);
-  this->SetResult(h->IsNumber() ? h->ToNumber()->IntegerValue() : SMFIS_TEMPFAIL);
+  this->EventWrap(isolate, local->fcall.helo, argc, argv);
 }
 
 
@@ -206,8 +201,7 @@ void MilterMAILFROM::Fire (Isolate *isolate, bindings_t *local)
     env,
     String::NewFromUtf8(isolate, szpp_argv[0])
   };
-  Handle<Value> h = this->EventWrap(isolate, local->fcall.envfrom, argc, argv);
-  this->SetResult(h->IsNumber() ? h->ToNumber()->IntegerValue() : SMFIS_TEMPFAIL);
+  this->EventWrap(isolate, local->fcall.envfrom, argc, argv);
 }
 
 
@@ -224,8 +218,7 @@ void MilterRCPTTO::Fire (Isolate *isolate, bindings_t *local)
     env,
     String::NewFromUtf8(isolate, szpp_argv[0])
   };
-  Handle<Value> h = this->EventWrap(isolate, local->fcall.envrcpt, argc, argv);
-  this->SetResult(h->IsNumber() ? h->ToNumber()->IntegerValue() : SMFIS_TEMPFAIL);
+  this->EventWrap(isolate, local->fcall.envrcpt, argc, argv);
 }
 
 
@@ -240,8 +233,7 @@ void MilterDATA::Fire (Isolate *isolate, bindings_t *local)
   Local<Value> argv[argc] = {
     env,
   };
-  Handle<Value> h = this->EventWrap(isolate, local->fcall.data, argc, argv);
-  this->SetResult(h->IsNumber() ? h->ToNumber()->IntegerValue() : SMFIS_TEMPFAIL);
+  this->EventWrap(isolate, local->fcall.data, argc, argv);
 }
 
 
@@ -259,8 +251,7 @@ void MilterHeader::Fire (Isolate *isolate, bindings_t *local)
     String::NewFromUtf8(isolate, sz_name),
     String::NewFromUtf8(isolate, sz_value)
   };
-  Handle<Value> h = this->EventWrap(isolate, local->fcall.header, argc, argv);
-  this->SetResult(h->IsNumber() ? h->ToNumber()->IntegerValue() : SMFIS_TEMPFAIL);
+  this->EventWrap(isolate, local->fcall.header, argc, argv);
 }
 
 
@@ -275,8 +266,7 @@ void MilterEndHeaders::Fire (Isolate *isolate, bindings_t *local)
   Local<Value> argv[argc] = {
     env,
   };
-  Handle<Value> h = this->EventWrap(isolate, local->fcall.eoh, argc, argv);
-  this->SetResult(h->IsNumber() ? h->ToNumber()->IntegerValue() : SMFIS_TEMPFAIL);
+  this->EventWrap(isolate, local->fcall.eoh, argc, argv);
 }
 
 
@@ -294,8 +284,7 @@ void MilterMessageData::Fire (Isolate *isolate, bindings_t *local)
     Buffer::Use(isolate, (char *)buf, len), // TODO: unsure if safe
     Number::New(isolate, len)
   };
-  Handle<Value> h = this->EventWrap(isolate, local->fcall.body, argc, argv);
-  this->SetResult(h->IsNumber() ? h->ToNumber()->IntegerValue() : SMFIS_TEMPFAIL);
+  this->EventWrap(isolate, local->fcall.body, argc, argv);
 }
 
 
@@ -310,8 +299,7 @@ void MilterEndMessage::Fire (Isolate *isolate, bindings_t *local)
   Local<Value> argv[argc] = {
     env,
   };
-  Handle<Value> h = this->EventWrap(isolate, local->fcall.eom, argc, argv);
-  this->SetResult(h->IsNumber() ? h->ToNumber()->IntegerValue() : SMFIS_TEMPFAIL);
+  this->EventWrap(isolate, local->fcall.eom, argc, argv);
 }
 
 
@@ -326,8 +314,7 @@ void MilterAbort::Fire (Isolate *isolate, bindings_t *local)
   Local<Value> argv[argc] = {
     env,
   };
-  Handle<Value> h = this->EventWrap(isolate, local->fcall.abort, argc, argv);
-  this->SetResult(h->IsNumber() ? h->ToNumber()->IntegerValue() : SMFIS_TEMPFAIL);
+  this->EventWrap(isolate, local->fcall.abort, argc, argv);
 }
 
 
@@ -342,8 +329,7 @@ void MilterClose::Fire (Isolate *isolate, bindings_t *local)
   Local<Value> argv[argc] = {
     env,
   };
-  Handle<Value> h = this->EventWrap(isolate, local->fcall.close, argc, argv);
-  this->SetResult(h->IsNumber() ? h->ToNumber()->IntegerValue() : SMFIS_TEMPFAIL);
+  this->EventWrap(isolate, local->fcall.close, argc, argv);
 
   this->DestroyEnvelope(isolate);
 }
