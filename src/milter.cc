@@ -377,15 +377,25 @@ sfsistat fi_close (SMFICTX *context)
 
   MilterClose *event = new MilterClose(env);
 #ifdef DEBUG_MILTEREVENT
-  fprintf(stderr, "close\n");
+  fprintf(stderr, "fi_close begin\n");
 #endif
   retval = generate_event(local, event);
+#ifdef DEBUG_MILTEREVENT
+  fprintf(stderr, "fi_close end\n");
+#endif
   delete event;
-
+#ifdef DEBUG_MILTEREVENT
+  fprintf(stderr, "fi_close: event free'd\n");
+#endif
   // final teardown sequence
   delete env;
+#ifdef DEBUG_MILTEREVENT
+  fprintf(stderr, "fi_close: envelope free'd\n");
+#endif
   smfi_setpriv(context, NULL);
-
+#ifdef DEBUG_MILTEREVENT
+  fprintf(stderr, "fi_close: privdata cleared\n");
+#endif
   return retval;
 }
 
