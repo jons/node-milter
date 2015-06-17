@@ -1,5 +1,5 @@
 var crypto = require('crypto');
-var milter = require('./build/Release/milter');
+var milter = require('./build/Debug/milter');
 
 process.on('uncaughtException', function (e) { console.log(e); });
 
@@ -11,7 +11,7 @@ function connect (envelope, host, address)
   envelope.ts_start = (new Date).getTime();
   envelope.sid = crypto.randomBytes(2).toString('hex');
 
-  console.log("[" + envelope.sid + "] connection from " + host + " (" + address + ")");
+  console.log("[" + envelope.sid + "-" + envelope.debugenv + "] connection from " + host + " (" + address + ")");
   return milter.SMFIS_CONTINUE;
 }
 
@@ -20,7 +20,8 @@ function connect (envelope, host, address)
  */
 function helo (envelope, identity)
 {
-  console.log("[" + envelope.sid + "] helo " + identity);
+  global.gc();
+  console.log("[" + envelope.sid + "-" + envelope.debugenv + "] helo " + identity);
   return milter.SMFIS_CONTINUE;
 }
 
@@ -42,8 +43,8 @@ function abort ()    { return milter.SMFIS_CONTINUE; }
 function close (envelope)
 {
   var now = (new Date).getTime();
-  console.log("[" + envelope.sid + "] connection closed");
-  console.log("[" + envelope.sid + "] session lasted " + (now - envelope.ts_start) + " msec");
+  console.log("[" + envelope.sid + "-" + envelope.debugenv + "] connection closed");
+  console.log("[" + envelope.sid + "-" + envelope.debugenv + "] session lasted " + (now - envelope.ts_start) + " msec");
   return milter.SMFIS_CONTINUE;
 }
 

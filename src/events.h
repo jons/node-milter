@@ -29,6 +29,8 @@ using namespace node;
 class MilterEvent
 {
   public:
+    unsigned int eid;
+
     // do the event work
     //virtual void Fire (Isolate *isolate, Handle<Object> &context) = 0;
     virtual void Fire (Isolate *isolate, bindings_t *local) = 0;

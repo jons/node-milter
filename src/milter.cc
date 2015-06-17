@@ -34,32 +34,39 @@ void trigger_event (uv_async_t *h)
 {
   bindings *local = (bindings *)h->data;
   Isolate *isolate = Isolate::GetCurrent();
+  Locker locker (isolate);
   HandleScope scope (isolate);
   MilterEvent *ev;
 
   // grab the queue lock
-  // dequeue one event
-  // relinquish the queue lock
   pthread_mutex_lock(&local->lck_queue);
-  ev = local->first;
-  if (NULL != ev)
-  {
-    local->first = ev->Next();
-    if (NULL == local->first)
-      local->last = NULL;
-    ev->Detatch();
-  }
-  pthread_mutex_unlock(&local->lck_queue);
 
+  // dequeue one event
+  ev = local->first;
   if (NULL == ev)
   {
-    // TODO: more debugging information
+    pthread_mutex_unlock(&local->lck_queue);
     fprintf(stderr, "spurious wakeup\n");
     return;
   }
+  local->first = ev->Next();
+  if (NULL == local->first)
+    local->last = NULL;
+  ev->Detatch();
 
-  ev->Lock();
-  // TODO: return value must be zero for success
+  if (!ev->Lock())
+  {
+    pthread_mutex_unlock(&local->lck_queue);
+    fprintf(stderr, "trigger_event event lock failure!\n");
+    return;
+  }
+
+  // debug event queue (must be holding queue lock!)
+  local->qsz--;
+  fprintf(stderr, "trigger_event eid=#%d queued=%d\n", ev->eid, local->qsz);
+
+  // XXX: for top speed, move queue unlock to this point (with or without event lock success)
+  pthread_mutex_unlock(&local->lck_queue);
 
   // launch the appropriate node.js callback for the given event
   ev->Fire(isolate, local);
@@ -67,9 +74,10 @@ void trigger_event (uv_async_t *h)
   // complete the work
   // signal the waiting milter worker thread
   // that thread is still responsible for the event heap memory
+  // TODO: check return value of Done() from pthread_cond_signal
   ev->Done();
 
-  // TODO: check return value of Done() from pthread_cond_signal
+  // TODO: check return value of Unlock()
   ev->Unlock();
 }
 
@@ -80,14 +88,15 @@ void trigger_event (uv_async_t *h)
 /**
  * queue an event from the libmilter side.
  */
-int generate_event (bindings_t *local, MilterEvent *event)
+int generate_event (envelope_t *env, MilterEvent *event)
 {
+  bindings_t *local = env->local;
   int retval;
 
   // lock the queue
   if (pthread_mutex_lock(&local->lck_queue))
   {
-    fprintf(stderr, "node-milter: queue lock failed\n");
+    fprintf(stderr, "node-milter: generate_event: queue lock failed\n");
     return SMFIS_TEMPFAIL;
   }
 
@@ -97,9 +106,11 @@ int generate_event (bindings_t *local, MilterEvent *event)
     pthread_mutex_unlock(&local->lck_queue);
     // TODO: handle error
 
-    fprintf(stderr, "node-milter: event lock failed\n");
+    fprintf(stderr, "node-milter: generate_event: event lock failed\n");
     return SMFIS_TEMPFAIL;
   }
+
+  event->eid = local->eidgen;
 
   // enqueue the event while holding both locks
   if (NULL == local->last)
@@ -113,7 +124,13 @@ int generate_event (bindings_t *local, MilterEvent *event)
     local->last = event;
   }
 
-  // unlock the queue to allow other libmilter threads to append events
+  // increment event counter and queue size
+  local->eidgen++;
+  local->qsz++;
+
+  fprintf(stderr, "generate_event: queued=%d\n", local->qsz);
+
+  // unlock the queue to allow other libmilter threads to append events to it
   pthread_mutex_unlock(&local->lck_queue);
 
   for (;;)
@@ -179,7 +196,7 @@ sfsistat fi_connect (SMFICTX *context, char *host, _SOCK_ADDR *sa)
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "connect \"%s\" \"%s\"\n", event->Host(), event->Address());
 #endif
-  retval = generate_event(local, event);
+  retval = generate_event(env, event);
   delete event;
   return retval;
 }
@@ -190,13 +207,12 @@ sfsistat fi_connect (SMFICTX *context, char *host, _SOCK_ADDR *sa)
 sfsistat fi_unknown (SMFICTX *context, const char *command)
 {
   envelope_t *env = (envelope_t *)smfi_getpriv(context);
-  bindings_t *local = env->local;
   int retval;
   MilterUnknown *event = new MilterUnknown(env, command);
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "unknown \"%s\"\n", command);
 #endif
-  retval = generate_event(local, event);
+  retval = generate_event(env, event);
   delete event;
   return retval;
 }
@@ -207,13 +223,12 @@ sfsistat fi_unknown (SMFICTX *context, const char *command)
 sfsistat fi_helo (SMFICTX *context, char *helo)
 {
   envelope_t *env = (envelope_t *)smfi_getpriv(context);
-  bindings_t *local = env->local;
   int retval;
   MilterHELO *event = new MilterHELO(env, helo);
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "helo \"%s\"\n", helo);
 #endif
-  retval = generate_event(local, event);
+  retval = generate_event(env, event);
   delete event;
   return retval;
 }
@@ -225,13 +240,12 @@ sfsistat fi_helo (SMFICTX *context, char *helo)
 sfsistat fi_envfrom (SMFICTX *context, char **argv)
 {
   envelope_t *env = (envelope_t *)smfi_getpriv(context);
-  bindings_t *local = env->local;
   int retval;
   MilterMAILFROM *event = new MilterMAILFROM(env, argv);
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "envfrom \"%s\"\n", argv[0]); // argv[0] is guaranteed
 #endif
-  retval = generate_event(local, event);
+  retval = generate_event(env, event);
   delete event;
   return retval;
 }
@@ -243,13 +257,12 @@ sfsistat fi_envfrom (SMFICTX *context, char **argv)
 sfsistat fi_envrcpt (SMFICTX *context, char **argv)
 {
   envelope_t *env = (envelope_t *)smfi_getpriv(context);
-  bindings_t *local = env->local;
   int retval;
   MilterRCPTTO *event = new MilterRCPTTO(env, argv);
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "envrcpt \"%s\"\n", argv[0]); // argv[0] is guaranteed
 #endif
-  retval = generate_event(local, event);
+  retval = generate_event(env, event);
   delete event;
   return retval;
 }
@@ -261,13 +274,12 @@ sfsistat fi_envrcpt (SMFICTX *context, char **argv)
 sfsistat fi_data (SMFICTX *context)
 {
   envelope_t *env = (envelope_t *)smfi_getpriv(context);
-  bindings_t *local = env->local;
   int retval;
   MilterDATA *event = new MilterDATA(env);
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "data\n");
 #endif
-  retval = generate_event(local, event);
+  retval = generate_event(env, event);
   delete event;
   return retval;
 }
@@ -279,13 +291,12 @@ sfsistat fi_data (SMFICTX *context)
 sfsistat fi_header (SMFICTX *context, char *name, char *value)
 {
   envelope_t *env = (envelope_t *)smfi_getpriv(context);
-  bindings_t *local = env->local;
   int retval;
   MilterHeader *event = new MilterHeader(env, name, value);
-#ifdef DEBUG_MILTEREVENT
+#ifdef DEBUG_MILTEREVENT_HEADERS_TOO
   fprintf(stderr, "header \"%s\" \"%s\"\n", name, value);
 #endif
-  retval = generate_event(local, event);
+  retval = generate_event(env, event);
   delete event;
   return retval;
 }
@@ -297,13 +308,12 @@ sfsistat fi_header (SMFICTX *context, char *name, char *value)
 sfsistat fi_eoh (SMFICTX *context)
 {
   envelope_t *env = (envelope_t *)smfi_getpriv(context);
-  bindings_t *local = env->local;
   int retval;
   MilterEndHeaders *event = new MilterEndHeaders(env);
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "eoh\n");
 #endif
-  retval = generate_event(local, event);
+  retval = generate_event(env, event);
   delete event;
   return retval;
 }
@@ -316,13 +326,12 @@ sfsistat fi_eoh (SMFICTX *context)
 sfsistat fi_body (SMFICTX *context, unsigned char *segment, size_t len)
 {
   envelope_t *env = (envelope_t *)smfi_getpriv(context);
-  bindings_t *local = env->local;
   int retval;
   MilterMessageData *event = new MilterMessageData(env, segment, len);
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "message-data (%lu bytes)\n", len);
 #endif
-  retval = generate_event(local, event);
+  retval = generate_event(env, event);
   delete event;
   return retval;
 }
@@ -334,13 +343,12 @@ sfsistat fi_body (SMFICTX *context, unsigned char *segment, size_t len)
 sfsistat fi_eom (SMFICTX *context)
 {
   envelope_t *env = (envelope_t *)smfi_getpriv(context);
-  bindings_t *local = env->local;
   int retval;
   MilterEndMessage *event = new MilterEndMessage(env);
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "eom\n");
 #endif
-  retval = generate_event(local, event);
+  retval = generate_event(env, event);
   delete event;
   return retval;
 }
@@ -355,13 +363,12 @@ sfsistat fi_eom (SMFICTX *context)
 sfsistat fi_abort (SMFICTX *context)
 {
   envelope_t *env = (envelope_t *)smfi_getpriv(context);
-  bindings_t *local = env->local;
   int retval;
   MilterAbort *event = new MilterAbort(env);
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "abort\n");
 #endif
-  retval = generate_event(local, event);
+  retval = generate_event(env, event);
   delete event;
   return retval;
 }
@@ -372,14 +379,13 @@ sfsistat fi_abort (SMFICTX *context)
 sfsistat fi_close (SMFICTX *context)
 {
   envelope_t *env = (envelope_t *)smfi_getpriv(context);
-  bindings_t *local = env->local;
   int retval;
 
   MilterClose *event = new MilterClose(env);
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "fi_close begin\n");
 #endif
-  retval = generate_event(local, event);
+  retval = generate_event(env, event);
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "fi_close end\n");
 #endif
@@ -387,6 +393,7 @@ sfsistat fi_close (SMFICTX *context)
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "fi_close: event free'd\n");
 #endif
+
   // final teardown sequence
   delete env;
 #ifdef DEBUG_MILTEREVENT
@@ -396,6 +403,7 @@ sfsistat fi_close (SMFICTX *context)
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "fi_close: privdata cleared\n");
 #endif
+
   return retval;
 }
 
@@ -408,6 +416,7 @@ void milter_worker (uv_work_t *request)
   bindings_t *local = static_cast<bindings_t *>(request->data);
   int r;
   r = smfi_main(local);
+  fprintf(stderr, "milter_worker finishing\n");
   // TODO: any concurrency issues here?
   local->retval = r;
 }
@@ -419,8 +428,12 @@ void milter_worker (uv_work_t *request)
 void milter_cleanup (uv_work_t *request, int status)
 {
   Isolate *isolate = Isolate::GetCurrent();
-  HandleScope scope(isolate);
+  Locker locker (isolate);
+  HandleScope scope (isolate);
+
   bindings_t *local = static_cast<bindings_t *>(request->data);
+
+  fprintf(stderr, "milter_cleanup started\n");
 
   // immediately stop event delivery
   uv_close((uv_handle_t *)&local->trigger, NULL);
@@ -449,9 +462,11 @@ void milter_cleanup (uv_work_t *request, int status)
  */
 void milter_start (const FunctionCallbackInfo<Value> &args)
 {
-  bindings_t *local = new bindings_t();
   Isolate *isolate = Isolate::GetCurrent();
+  Locker locker (isolate);
   HandleScope scope(isolate);
+
+  bindings_t *local = new bindings_t();
   struct smfiDesc desc;
 
   desc.xxfi_name      =(char *)g_name;
