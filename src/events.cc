@@ -277,11 +277,12 @@ MilterMessageData::MilterMessageData (envelope_t *env, const unsigned char *buf,
 
 void MilterMessageData::Fire (Isolate *isolate, bindings_t *local)
 {
+  char *nodebuf = new char[len];
   const unsigned argc = 3;
   Local<Value> env = this->RestoreEnvelope(isolate);
   Local<Value> argv[argc] = {
     env,
-    Buffer::Use(isolate, (char *)buf, len), // TODO: unsure if safe
+    Buffer::Use(isolate, nodebuf, len),
     Number::New(isolate, len)
   };
   this->EventWrap(isolate, local->fcall.body, argc, argv);

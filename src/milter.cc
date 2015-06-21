@@ -633,7 +633,7 @@ void milter_stop (const FunctionCallbackInfo<Value> &args)
 /**
  * module initialization
  */
-void init (Handle<Object> target)
+void init (Handle<Object> target, Handle<Value> module, Handle<Context> context)
 {
   Isolate *isolate = Isolate::GetCurrent();
 
@@ -679,4 +679,4 @@ void init (Handle<Object> target)
   NODE_SET_METHOD(target, "stop",       milter_stop);
 }
 
-NODE_MODULE(milter, init)
+NODE_MODULE_CONTEXT_AWARE(milter, init)

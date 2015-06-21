@@ -1,3 +1,4 @@
+require('v8-profiler');
 var crypto = require('crypto');
 var milter = require('./build/Debug/milter');
 
