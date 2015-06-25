@@ -29,11 +29,10 @@ using namespace node;
 class MilterEvent
 {
   public:
-    unsigned int eid;
+    unsigned int eid; // temp var for debug
 
-    // do the event work
-    //virtual void Fire (Isolate *isolate, Handle<Object> &context) = 0;
-    virtual void Fire (Isolate *isolate, bindings_t *local) = 0;
+    // the event work
+    void Fire (Isolate *isolate, bindings_t *local);
 
     // take control of the event
     bool Lock ();
@@ -46,42 +45,47 @@ class MilterEvent
     bool Wait ();
 
     /**
-     * mark the event as complete
-     * this call is used on the node.js side!
+     * allow an event callback to set a milter result flag
+     * returns true if libmilter thread is signaled
      */
-    bool Done ();
+    bool Done (Isolate *isolate, int retval);
 
+    // linklist junk
     void Append (MilterEvent *ev);
     void Detatch ();
-
-    //
     MilterEvent *Next () const;
+
+    // not sure if needed
     bool IsDone () const;
     int Result () const;
 
     virtual ~MilterEvent ();
 
   protected:
-    MilterEvent (envelope_t *env);
+    explicit MilterEvent (envelope_t *env);
 
     /**
+     * each event type must select its associated event callback from
+     *
      */
-    Local<Object> CreateEnvelope (Isolate *isolate);
-    Local<Object> RestoreEnvelope (Isolate *isolate);
-    void DestroyEnvelope (Isolate *isolate);
+    virtual void FireWrapper (Isolate *isolate, bindings_t *local) = 0;
+    void Prefire (Isolate *isolate);
+    void Postfire (Isolate *isolate);
 
     /**
-     * shared wrapper for Fire() implementors
-     * all events are triggered in the same manner
+     * each event type must implement
      */
-    void EventWrap (Isolate *isolate, Persistent<Function> &pfunc, unsigned int argc, Local<Value> *argv);
+    void DoFCall (Isolate *isolate, Persistent<Function> &pfunc, unsigned int argc, Local<Value> *argv);
 
+    Local<Object> envelope;
+
+    envelope_t *fi_envelope;
 
   private:
     MilterEvent *ev_next;
     bool is_done;
-    envelope_t *fi_envelope;
     int fi_retval;
+
     pthread_mutex_t pt_lock;
     pthread_cond_t pt_ready;
 };
@@ -99,15 +103,13 @@ class MilterConnect : public MilterEvent
 {
   public:
     MilterConnect (envelope_t *env, const char *host, sockaddr_in *sa);
-
-    /**
-     * fire connect event
-     */
-    //void Fire (Isolate *isolate, Handle<Object> &context);
-    void Fire (Isolate *isolate, bindings_t *local);
+    void FireWrapper (Isolate *isolate, bindings_t *local);
 
     const char *Host() const;
     const char *Address() const;
+
+  protected:
+    void Prefire (Isolate *isolate);
 
   private:
     const char *sz_host;
@@ -121,7 +123,7 @@ class MilterUnknown : public MilterEvent
 {
   public:
     MilterUnknown (envelope_t *env, const char *command);
-    void Fire (Isolate *isolate, bindings_t *local);
+    void FireWrapper (Isolate *isolate, bindings_t *local);
 
   private:
     const char *sz_command;
@@ -134,7 +136,7 @@ class MilterHELO : public MilterEvent
 {
   public:
     MilterHELO (envelope_t *env, const char *helo);
-    void Fire (Isolate *isolate, bindings_t *local);
+    void FireWrapper (Isolate *isolate, bindings_t *local);
 
   private:
     const char *sz_helo;
@@ -147,7 +149,7 @@ class MilterMAILFROM : public MilterEvent
 {
   public:
     MilterMAILFROM (envelope_t *env, char **argv);
-    void Fire (Isolate *isolate, bindings_t *local);
+    void FireWrapper (Isolate *isolate, bindings_t *local);
 
   private:
     char **szpp_argv;
@@ -160,7 +162,7 @@ class MilterRCPTTO : public MilterEvent
 {
   public:
     MilterRCPTTO (envelope_t *env, char **argv);
-    void Fire (Isolate *isolate, bindings_t *local);
+    void FireWrapper (Isolate *isolate, bindings_t *local);
 
   private:
     char **szpp_argv;
@@ -173,7 +175,7 @@ class MilterDATA : public MilterEvent
 {
   public:
     MilterDATA (envelope_t *env);
-    void Fire (Isolate *isolate, bindings_t *local);
+    void FireWrapper (Isolate *isolate, bindings_t *local);
 };
 
 
@@ -183,7 +185,7 @@ class MilterHeader : public MilterEvent
 {
   public:
     MilterHeader (envelope_t *env, const char *name, const char *value);
-    void Fire (Isolate *isolate, bindings_t *local);
+    void FireWrapper (Isolate *isolate, bindings_t *local);
 
   private:
     const char *sz_name;
@@ -197,7 +199,7 @@ class MilterEndHeaders : public MilterEvent
 {
   public:
     MilterEndHeaders (envelope_t *env);
-    void Fire (Isolate *isolate, bindings_t *local);
+    void FireWrapper (Isolate *isolate, bindings_t *local);
 };
 
 
@@ -207,7 +209,7 @@ class MilterMessageData : public MilterEvent
 {
   public:
     MilterMessageData (envelope_t *env, const unsigned char *buf, const size_t len);
-    void Fire (Isolate *isolate, bindings_t *local);
+    void FireWrapper (Isolate *isolate, bindings_t *local);
 
   private:
     const unsigned char *buf;
@@ -221,7 +223,7 @@ class MilterEndMessage : public MilterEvent
 {
   public:
     MilterEndMessage (envelope_t *env);
-    void Fire (Isolate *isolate, bindings_t *local);
+    void FireWrapper (Isolate *isolate, bindings_t *local);
 };
 
 
@@ -231,7 +233,7 @@ class MilterAbort : public MilterEvent
 {
   public:
     MilterAbort (envelope_t *env);
-    void Fire (Isolate *isolate, bindings_t *local);
+    void FireWrapper (Isolate *isolate, bindings_t *local);
 };
 
 
@@ -241,7 +243,9 @@ class MilterClose : public MilterEvent
 {
   public:
     MilterClose (envelope_t *env);
-    void Fire (Isolate *isolate, bindings_t *local);
+    void FireWrapper (Isolate *isolate, bindings_t *local);
+  protected:
+    void Postfire (Isolate *isolate);
 };
 
 

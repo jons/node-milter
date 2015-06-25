@@ -9,25 +9,28 @@
  * hahaha!
  */
 
-#include <node.h>
-#include <node_buffer.h>
-#include <v8.h>
+#include <stdio.h>
+#include <string.h>
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <assert.h>
+#include <node.h>
+#include <node_buffer.h>
+#include <v8.h>
 #include "libmilter/mfapi.h"
 #include "milter.h"
 #include "events.h"
+#include "envelope.h"
 
 using namespace v8;
 using namespace node;
 
 
 MilterEvent::MilterEvent (envelope_t *env)
-    : ev_next(NULL),
+    : fi_envelope(env),
+      ev_next(NULL),
       is_done(false),
-      fi_envelope(env),
-      fi_retval(0)
+      fi_retval(SMFIS_TEMPFAIL) // TODO: allow custom default
     {
       pthread_mutex_init(&this->pt_lock, NULL);
       pthread_cond_init(&this->pt_ready, NULL);
@@ -40,11 +43,6 @@ bool MilterEvent::Unlock () { return 0 == pthread_mutex_unlock(&this->pt_lock); 
 
 bool MilterEvent::Wait () { return 0 == pthread_cond_wait(&this->pt_ready, &this->pt_lock); }
 
-bool MilterEvent::Done ()
-{
-  this->is_done = (0 == pthread_cond_signal(&this->pt_ready));
-  return this->is_done;
-}
 
 void MilterEvent::Append (MilterEvent *ev)
 {
@@ -71,61 +69,76 @@ int MilterEvent::Result () const { return this->fi_retval; }
 
 
 /**
- * must be called during trigger_event
- * create new envelope on connect... or on negotiate. hmm
+ * the last call made by the script kiddie from a callback is:
+ *     envelope.done(retval)
+ * that then returns here, via the envelope's pointer to the current event
+ *
+ * xxfi_close will always be a MilterClose which will cause Postfire() to
+ * Reset() its persistent envelope handle
  */
-Local<Object> MilterEvent::CreateEnvelope (Isolate *isolate)
+bool MilterEvent::Done (Isolate *isolate, int retval)
 {
-  char debugenv[1024] = {'\0'};
-  Local<Object> object = Object::New(isolate);
-  this->fi_envelope->object.Reset(isolate, object);
-  // TODO: add relevant and meaningful contextual information
-  snprintf(debugenv, sizeof(debugenv)-1, "%p", this->fi_envelope);
-  object->Set(String::NewFromUtf8(isolate, "debugenv", String::kInternalizedString), String::NewFromUtf8(isolate, debugenv));
-  return object;
+  this->Postfire(isolate);
+
+  this->fi_retval = retval;
+  this->is_done = (0 == pthread_cond_signal(&this->pt_ready));
+
+  // TODO: throw FatalException if the sleeping libmilter thread is not signaled
+
+  this->Unlock();
+
+  // TODO: throw FatalException if lock is not yielded?
+
+  return this->is_done;
 }
 
+
 /**
+ * the default prefire event
+ *
  * must be called during trigger_event
  * restore existing object for session
  */
-Local<Object> MilterEvent::RestoreEnvelope (Isolate *isolate)
+void MilterEvent::Prefire (Isolate *isolate)
 {
-  return Local<Object>::New(isolate, this->fi_envelope->object);
+  fprintf(stderr, "restore prefire\n");
+
+  this->envelope = Local<Object>::New(isolate, this->fi_envelope->object);
+}
+
+/**
+ * the default postfire event (do nothing)
+ */
+void MilterEvent::Postfire (Isolate *isolate)
+{
+  fprintf(stderr, "do-nothing postfire\n");
 }
 
 
 /**
- * must be called during trigger_event
- * destroy the envelope after xxfi_close is complete
  */
-void MilterEvent::DestroyEnvelope (Isolate *isolate)
+void MilterEvent::Fire (Isolate *isolate, bindings_t *local)
 {
-  this->fi_envelope->object.Reset();
+  this->Prefire(isolate);
+
+  Envelope *env = ObjectWrap::Unwrap<Envelope>(this->envelope);
+  env->SetCurrentEvent(this);
+
+  this->FireWrapper(isolate, local);
 }
 
 
 /**
- * shared wrapper for Fire() implementors
- * all events are triggered in the same manner
+ * shared wrapper for each event implementation
+ * XXX: maybe inline this for maximum gofast
  */
-void MilterEvent::EventWrap (Isolate *isolate, Persistent<Function> &pfunc, unsigned int argc, Local<Value> *argv)
+void MilterEvent::DoFCall (Isolate *isolate, Persistent<Function> &pfunc, unsigned int argc, Local<Value> *argv)
 {
-  this->fi_retval = SMFIS_TEMPFAIL;
-
   TryCatch tc;
   Local<Function> fcall = Local<Function>::New(isolate, pfunc);
-  Handle<Value> h = fcall->Call(isolate->GetCurrentContext()->Global(), argc, argv);
-  if (h->IsNumber())
-    this->fi_retval = h->ToNumber()->IntegerValue();
+  fcall->Call(isolate->GetCurrentContext()->Global(), argc, argv);
   if (tc.HasCaught())
-  {
     FatalException(tc);
-    // XXX: this value isn't special; it just coaxes the caller into telling libmilter to TEMPFAIL
-    return;
-  }
-
-  this->is_done = true;
 }
 
 
@@ -137,16 +150,39 @@ MilterConnect::MilterConnect (envelope_t *env, const char *host, sockaddr_in *sa
   inet_ntop(AF_INET, &((sockaddr_in *)sa)->sin_addr, sz_addr, sizeof sz_addr);
 }
 
-void MilterConnect::Fire (Isolate *isolate, bindings_t *local)
+
+/**
+ * connect prefire creates an envelope, instead of recovering the existing one
+ */
+void MilterConnect::Prefire (Isolate *isolate)
+{
+  HandleScope scope (isolate);
+
+  char debugenv[1024] = {'\0'};
+
+  fprintf(stderr, "connect prefire\n");
+
+  this->envelope = Envelope::NewInstance(isolate, scope);
+
+  // TODO: add relevant and meaningful contextual information
+  snprintf(debugenv, sizeof(debugenv)-1, "%p", this);
+  this->envelope->Set(String::NewFromUtf8(isolate, "debugenv", String::kInternalizedString), String::NewFromUtf8(isolate, debugenv));
+
+  this->fi_envelope->object.Reset(isolate, this->envelope);
+}
+
+
+/**
+ */
+void MilterConnect::FireWrapper (Isolate *isolate, bindings_t *local)
 {
   const unsigned argc = 3;
-  Local<Value> env = this->CreateEnvelope(isolate);
   Local<Value> argv[argc] = {
-    env,
+    this->envelope,
     String::NewFromUtf8(isolate, this->sz_host),
     String::NewFromUtf8(isolate, this->sz_addr)
   };
-  this->EventWrap(isolate, local->fcall.connect, argc, argv);
+  this->DoFCall(isolate, local->fcall.connect, argc, argv);
 }
 
 const char *MilterConnect::Host() const { return this->sz_host; }
@@ -159,15 +195,16 @@ const char *MilterConnect::Address() const { return this->sz_addr; }
 MilterUnknown::MilterUnknown (envelope_t *env, const char *command)
   : MilterEvent(env), sz_command(command) { }
 
-void MilterUnknown::Fire (Isolate *isolate, bindings_t *local)
+/**
+ */
+void MilterUnknown::FireWrapper (Isolate *isolate, bindings_t *local)
 {
   const unsigned argc = 2;
-  Local<Value> env = this->RestoreEnvelope(isolate);
   Local<Value> argv[argc] = {
-    env,
+    this->envelope,
     String::NewFromUtf8(isolate, this->sz_command)
   };
-  this->EventWrap(isolate, local->fcall.unknown, argc, argv);
+  this->DoFCall(isolate, local->fcall.unknown, argc, argv);
 }
 
 
@@ -176,15 +213,15 @@ void MilterUnknown::Fire (Isolate *isolate, bindings_t *local)
 MilterHELO::MilterHELO (envelope_t *env, const char *helo)
   : MilterEvent(env), sz_helo(helo) { }
 
-void MilterHELO::Fire (Isolate *isolate, bindings_t *local)
+
+void MilterHELO::FireWrapper (Isolate *isolate, bindings_t *local)
 {
   const unsigned argc = 2;
-  Local<Value> env = this->RestoreEnvelope(isolate);
   Local<Value> argv[argc] = {
-    env,
+    this->envelope,
     String::NewFromUtf8(isolate, sz_helo)
   };
-  this->EventWrap(isolate, local->fcall.helo, argc, argv);
+  this->DoFCall(isolate, local->fcall.helo, argc, argv);
 }
 
 
@@ -193,15 +230,14 @@ void MilterHELO::Fire (Isolate *isolate, bindings_t *local)
 MilterMAILFROM::MilterMAILFROM (envelope_t *env, char **argv)
   : MilterEvent(env), szpp_argv(argv) { }
 
-void MilterMAILFROM::Fire (Isolate *isolate, bindings_t *local)
+void MilterMAILFROM::FireWrapper (Isolate *isolate, bindings_t *local)
 {
   const unsigned argc = 2;
-  Local<Value> env = this->RestoreEnvelope(isolate);
   Local<Value> argv[argc] = {
-    env,
+    this->envelope,
     String::NewFromUtf8(isolate, szpp_argv[0])
   };
-  this->EventWrap(isolate, local->fcall.envfrom, argc, argv);
+  this->DoFCall(isolate, local->fcall.envfrom, argc, argv);
 }
 
 
@@ -210,15 +246,14 @@ void MilterMAILFROM::Fire (Isolate *isolate, bindings_t *local)
 MilterRCPTTO::MilterRCPTTO (envelope_t *env, char **argv)
   : MilterEvent(env), szpp_argv(argv) { }
 
-void MilterRCPTTO::Fire (Isolate *isolate, bindings_t *local)
+void MilterRCPTTO::FireWrapper (Isolate *isolate, bindings_t *local)
 {
   const unsigned argc = 2;
-  Local<Value> env = this->RestoreEnvelope(isolate);
   Local<Value> argv[argc] = {
-    env,
+    this->envelope,
     String::NewFromUtf8(isolate, szpp_argv[0])
   };
-  this->EventWrap(isolate, local->fcall.envrcpt, argc, argv);
+  this->DoFCall(isolate, local->fcall.envrcpt, argc, argv);
 }
 
 
@@ -226,14 +261,13 @@ void MilterRCPTTO::Fire (Isolate *isolate, bindings_t *local)
 
 MilterDATA::MilterDATA (envelope_t *env) : MilterEvent(env) { }
 
-void MilterDATA::Fire (Isolate *isolate, bindings_t *local)
+void MilterDATA::FireWrapper (Isolate *isolate, bindings_t *local)
 {
   const unsigned argc = 1;
-  Local<Value> env = this->RestoreEnvelope(isolate);
   Local<Value> argv[argc] = {
-    env,
+    this->envelope,
   };
-  this->EventWrap(isolate, local->fcall.data, argc, argv);
+  this->DoFCall(isolate, local->fcall.data, argc, argv);
 }
 
 
@@ -242,16 +276,15 @@ void MilterDATA::Fire (Isolate *isolate, bindings_t *local)
 MilterHeader::MilterHeader (envelope_t *env, const char *name, const char *value)
   : MilterEvent(env), sz_name(name), sz_value(value) { }
 
-void MilterHeader::Fire (Isolate *isolate, bindings_t *local)
+void MilterHeader::FireWrapper (Isolate *isolate, bindings_t *local)
 {
   const unsigned argc = 3;
-  Local<Value> env = this->RestoreEnvelope(isolate);
   Local<Value> argv[argc] = {
-    env,
+    this->envelope,
     String::NewFromUtf8(isolate, sz_name),
     String::NewFromUtf8(isolate, sz_value)
   };
-  this->EventWrap(isolate, local->fcall.header, argc, argv);
+  this->DoFCall(isolate, local->fcall.header, argc, argv);
 }
 
 
@@ -259,14 +292,13 @@ void MilterHeader::Fire (Isolate *isolate, bindings_t *local)
 
 MilterEndHeaders::MilterEndHeaders (envelope_t *env) : MilterEvent(env) { }
 
-void MilterEndHeaders::Fire (Isolate *isolate, bindings_t *local)
+void MilterEndHeaders::FireWrapper (Isolate *isolate, bindings_t *local)
 {
   const unsigned argc = 1;
-  Local<Value> env = this->RestoreEnvelope(isolate);
   Local<Value> argv[argc] = {
-    env,
+    this->envelope,
   };
-  this->EventWrap(isolate, local->fcall.eoh, argc, argv);
+  this->DoFCall(isolate, local->fcall.eoh, argc, argv);
 }
 
 
@@ -275,17 +307,17 @@ void MilterEndHeaders::Fire (Isolate *isolate, bindings_t *local)
 MilterMessageData::MilterMessageData (envelope_t *env, const unsigned char *buf, const size_t len)
   : MilterEvent(env), buf(buf), len(len) { }
 
-void MilterMessageData::Fire (Isolate *isolate, bindings_t *local)
+void MilterMessageData::FireWrapper (Isolate *isolate, bindings_t *local)
 {
   char *nodebuf = new char[len];
   const unsigned argc = 3;
-  Local<Value> env = this->RestoreEnvelope(isolate);
   Local<Value> argv[argc] = {
-    env,
+    this->envelope,
     Buffer::Use(isolate, nodebuf, len),
     Number::New(isolate, len)
   };
-  this->EventWrap(isolate, local->fcall.body, argc, argv);
+  // TODO: copy buf into nodebuf
+  this->DoFCall(isolate, local->fcall.body, argc, argv);
 }
 
 
@@ -293,14 +325,13 @@ void MilterMessageData::Fire (Isolate *isolate, bindings_t *local)
 
 MilterEndMessage::MilterEndMessage (envelope_t *env) : MilterEvent(env) { }
 
-void MilterEndMessage::Fire (Isolate *isolate, bindings_t *local)
+void MilterEndMessage::FireWrapper (Isolate *isolate, bindings_t *local)
 {
   const unsigned argc = 1;
-  Local<Value> env = this->RestoreEnvelope(isolate);
   Local<Value> argv[argc] = {
-    env,
+    this->envelope,
   };
-  this->EventWrap(isolate, local->fcall.eom, argc, argv);
+  this->DoFCall(isolate, local->fcall.eom, argc, argv);
 }
 
 
@@ -308,14 +339,13 @@ void MilterEndMessage::Fire (Isolate *isolate, bindings_t *local)
 
 MilterAbort::MilterAbort (envelope_t *env) : MilterEvent(env) { }
 
-void MilterAbort::Fire (Isolate *isolate, bindings_t *local)
+void MilterAbort::FireWrapper (Isolate *isolate, bindings_t *local)
 {
   const unsigned argc = 1;
-  Local<Value> env = this->RestoreEnvelope(isolate);
   Local<Value> argv[argc] = {
-    env,
+    this->envelope,
   };
-  this->EventWrap(isolate, local->fcall.abort, argc, argv);
+  this->DoFCall(isolate, local->fcall.abort, argc, argv);
 }
 
 
@@ -323,14 +353,21 @@ void MilterAbort::Fire (Isolate *isolate, bindings_t *local)
 
 MilterClose::MilterClose (envelope_t *env) : MilterEvent(env) { }
 
-void MilterClose::Fire (Isolate *isolate, bindings_t *local)
+void MilterClose::FireWrapper (Isolate *isolate, bindings_t *local)
 {
   const unsigned argc = 1;
-  Local<Value> env = this->RestoreEnvelope(isolate);
   Local<Value> argv[argc] = {
-    env,
+    this->envelope,
   };
-  this->EventWrap(isolate, local->fcall.close, argc, argv);
+  this->DoFCall(isolate, local->fcall.close, argc, argv);
+}
 
-  this->DestroyEnvelope(isolate);
+
+/**
+ */
+void MilterClose::Postfire (Isolate *isolate)
+{
+  fprintf(stderr, "close postfire\n");
+
+  this->fi_envelope->object.Reset();
 }

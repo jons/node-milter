@@ -10,6 +10,7 @@
 #include "libmilter/mfapi.h"
 #include "forward.h"
 #include "events.h"
+#include "envelope.h"
 
 using namespace v8;
 using namespace node;
@@ -70,15 +71,6 @@ void trigger_event (uv_async_t *h)
 
   // launch the appropriate node.js callback for the given event
   ev->Fire(isolate, local);
-
-  // complete the work
-  // signal the waiting milter worker thread
-  // that thread is still responsible for the event heap memory
-  // TODO: check return value of Done() from pthread_cond_signal
-  ev->Done();
-
-  // TODO: check return value of Unlock()
-  ev->Unlock();
 }
 
 
@@ -646,7 +638,6 @@ void init (Handle<Object> target, Handle<Value> module, Handle<Context> context)
   target->Set(String::NewFromUtf8(isolate, "SMFIM_EOM",     String::kInternalizedString), Number::New(isolate, SMFIM_EOM));
   target->Set(String::NewFromUtf8(isolate, "SMFIM_EOH",     String::kInternalizedString), Number::New(isolate, SMFIM_EOH));
 
-
   // negotiate flags
   target->Set(String::NewFromUtf8(isolate, "SMFIF_NONE",        String::kInternalizedString), Number::New(isolate, SMFIF_NONE));
   target->Set(String::NewFromUtf8(isolate, "SMFIF_ADDHDRS",     String::kInternalizedString), Number::New(isolate, SMFIF_ADDHDRS));
@@ -671,6 +662,8 @@ void init (Handle<Object> target, Handle<Value> module, Handle<Context> context)
 
   // callback return val for negotiate only
   target->Set(String::NewFromUtf8(isolate, "SMFIS_ALL_OPTS", String::kInternalizedString), Number::New(isolate, SMFIS_ALL_OPTS));
+
+  Envelope::Init(target);
 
   NODE_SET_METHOD(target, "start",      milter_start);
   NODE_SET_METHOD(target, "setbacklog", milter_setbacklog);

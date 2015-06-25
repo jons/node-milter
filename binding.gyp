@@ -2,7 +2,7 @@
   "targets": [
     {
       "target_name": "milter",
-      "sources": [ "src/events.cc", "src/milter.cc" ],
+      "sources": [ "src/envelope.cc", "src/events.cc", "src/milter.cc" ],
       "include_dirs": [ "." ],
       "cflags": [ "-g -Wall -DDEBUG_MILTEREVENT" ],
       "cflags!": [ "-O3" ],
