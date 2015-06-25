@@ -10,7 +10,6 @@
 #include <node.h>
 #include <node_object_wrap.h>
 #include <v8.h>
-#include "forward.h"
 #include "events.h"
 
 using namespace v8;
@@ -36,8 +35,6 @@ class Envelope : public ObjectWrap
     static void Done (const FunctionCallbackInfo<Value> &args);
 
     static Persistent<Function> constructor;
-
-    bindings_t *local;
 
     MilterEvent *current_event;
 };

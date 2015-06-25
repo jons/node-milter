@@ -69,8 +69,8 @@ class MilterEvent
      *
      */
     virtual void FireWrapper (Isolate *isolate, bindings_t *local) = 0;
-    void Prefire (Isolate *isolate);
-    void Postfire (Isolate *isolate);
+    virtual void Prefire (Isolate *isolate, HandleScope &scope);
+    virtual void Postfire (Isolate *isolate);
 
     /**
      * each event type must implement
@@ -109,7 +109,7 @@ class MilterConnect : public MilterEvent
     const char *Address() const;
 
   protected:
-    void Prefire (Isolate *isolate);
+    void Prefire (Isolate *isolate, HandleScope &scope);
 
   private:
     const char *sz_host;

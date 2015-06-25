@@ -3,7 +3,8 @@
  *
  *
  */
-
+#include <stdio.h>
+#include <string.h>
 #include <assert.h>
 #include <node.h>
 #include <v8.h>
@@ -34,7 +35,7 @@ void Envelope::Init (Handle<Object> target)
   Isolate *isolate = Isolate::GetCurrent();
   Local<FunctionTemplate> tmpl = FunctionTemplate::New(isolate, New);
   tmpl->SetClassName(String::NewFromUtf8(isolate, "Envelope"));
-  tmpl->InstanceTemplate()->SetInternalFieldCount(0);
+  tmpl->InstanceTemplate()->SetInternalFieldCount(1);
 
   NODE_SET_PROTOTYPE_METHOD(tmpl, "done", Done);
 
@@ -63,7 +64,8 @@ void Envelope::New (const FunctionCallbackInfo<Value> &args)
 
   if (args.IsConstructCall())
   {
-    Envelope *envelope = new Envelope();
+    fprintf(stderr, "construct envelope\n");
+    Envelope *envelope = new Envelope;
     envelope->Wrap(args.This());
     args.GetReturnValue().Set(args.This());
   }

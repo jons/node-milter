@@ -13,7 +13,7 @@ function connect (envelope, host, address)
   envelope.sid = crypto.randomBytes(2).toString('hex');
 
   console.log("[" + envelope.sid + "-" + envelope.debugenv + "] connection from " + host + " (" + address + ")");
-  return milter.SMFIS_CONTINUE;
+  envelope.done(milter.SMFIS_CONTINUE);
 }
 
 
@@ -23,20 +23,20 @@ function helo (envelope, identity)
 {
   global.gc();
   console.log("[" + envelope.sid + "-" + envelope.debugenv + "] helo " + identity);
-  return milter.SMFIS_CONTINUE;
+  envelope.done(milter.SMFIS_CONTINUE);
 }
 
 
 //
-function unknown ()  { return milter.SMFIS_CONTINUE; }
-function mailfrom () { return milter.SMFIS_CONTINUE; }
-function rcptto ()   { return milter.SMFIS_CONTINUE; }
-function mstart ()   { return milter.SMFIS_CONTINUE; }
-function header ()   { return milter.SMFIS_CONTINUE; }
-function eoh ()      { return milter.SMFIS_CONTINUE; }
-function segment ()  { return milter.SMFIS_CONTINUE; }
-function mfinish ()  { return milter.SMFIS_CONTINUE; }
-function abort ()    { return milter.SMFIS_CONTINUE; }
+function unknown (envelope)  { envelope.done(milter.SMFIS_CONTINUE); }
+function mailfrom (envelope) { envelope.done(milter.SMFIS_CONTINUE); }
+function rcptto (envelope)   { envelope.done(milter.SMFIS_CONTINUE); }
+function mstart (envelope)   { envelope.done(milter.SMFIS_CONTINUE); }
+function header (envelope)   { envelope.done(milter.SMFIS_CONTINUE); }
+function eoh (envelope)      { envelope.done(milter.SMFIS_CONTINUE); }
+function segment (envelope)  { envelope.done(milter.SMFIS_CONTINUE); }
+function mfinish (envelope)  { envelope.done(milter.SMFIS_CONTINUE); }
+function abort (envelope)    { envelope.done(milter.SMFIS_CONTINUE); }
 
 
 /**
@@ -46,7 +46,7 @@ function close (envelope)
   var now = (new Date).getTime();
   console.log("[" + envelope.sid + "-" + envelope.debugenv + "] connection closed");
   console.log("[" + envelope.sid + "-" + envelope.debugenv + "] session lasted " + (now - envelope.ts_start) + " msec");
-  return milter.SMFIS_CONTINUE;
+  envelope.done(milter.SMFIS_CONTINUE);
 }
 
 

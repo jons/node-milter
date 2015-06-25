@@ -99,7 +99,7 @@ bool MilterEvent::Done (Isolate *isolate, int retval)
  * must be called during trigger_event
  * restore existing object for session
  */
-void MilterEvent::Prefire (Isolate *isolate)
+void MilterEvent::Prefire (Isolate *isolate, HandleScope &scope)
 {
   fprintf(stderr, "restore prefire\n");
 
@@ -119,7 +119,8 @@ void MilterEvent::Postfire (Isolate *isolate)
  */
 void MilterEvent::Fire (Isolate *isolate, bindings_t *local)
 {
-  this->Prefire(isolate);
+  HandleScope scope (isolate);
+  this->Prefire(isolate, scope);
 
   Envelope *env = ObjectWrap::Unwrap<Envelope>(this->envelope);
   env->SetCurrentEvent(this);
@@ -154,10 +155,8 @@ MilterConnect::MilterConnect (envelope_t *env, const char *host, sockaddr_in *sa
 /**
  * connect prefire creates an envelope, instead of recovering the existing one
  */
-void MilterConnect::Prefire (Isolate *isolate)
+void MilterConnect::Prefire (Isolate *isolate, HandleScope &scope)
 {
-  HandleScope scope (isolate);
-
   char debugenv[1024] = {'\0'};
 
   fprintf(stderr, "connect prefire\n");
