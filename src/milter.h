@@ -16,7 +16,7 @@ using namespace v8;
 struct bindings
 {
   bindings ()
-  : eidgen(1), qsz(0), first(NULL), last(NULL)
+  : first(NULL), last(NULL)
   {
     // TODO: deal with error case
     pthread_mutex_init(&lck_queue, NULL);
@@ -33,9 +33,6 @@ struct bindings
   uv_loop_t *loop;
   uv_work_t request;
   uv_async_t trigger;
-
-  unsigned int eidgen;
-  unsigned int qsz;
 
   pthread_mutex_t lck_queue;
   MilterEvent *first, *last;

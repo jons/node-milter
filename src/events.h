@@ -29,18 +29,17 @@ using namespace node;
 class MilterEvent
 {
   public:
-    unsigned int eid; // temp var for debug
-
-    // the event work
+    /**
+     * called by node worker to begin the main event work
+     */
     void Fire (Isolate *isolate, bindings_t *local);
 
-    // take control of the event
+    // control of the event
     bool Lock ();
     bool Unlock ();
 
     /**
-     * wait until event is ready
-     * this call is used on the libmilter side!
+     * called by libmilter worker to wait until event is ready
      */
     bool Wait ();
 

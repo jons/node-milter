@@ -3,8 +3,7 @@
  *
  *
  */
-#include <stdio.h>
-#include <string.h>
+
 #include <assert.h>
 #include <node.h>
 #include <v8.h>
@@ -64,7 +63,6 @@ void Envelope::New (const FunctionCallbackInfo<Value> &args)
 
   if (args.IsConstructCall())
   {
-    fprintf(stderr, "construct envelope\n");
     Envelope *envelope = new Envelope;
     envelope->Wrap(args.This());
     args.GetReturnValue().Set(args.This());

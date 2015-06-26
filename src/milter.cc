@@ -40,14 +40,18 @@ void trigger_event (uv_async_t *h)
   MilterEvent *ev;
 
   // grab the queue lock
-  pthread_mutex_lock(&local->lck_queue);
+  if (pthread_mutex_lock(&local->lck_queue))
+  {
+    fprintf(stderr, "trigger_event: queue lock failed\n");
+    return;
+  }
 
   // dequeue one event
   ev = local->first;
   if (NULL == ev)
   {
     pthread_mutex_unlock(&local->lck_queue);
-    fprintf(stderr, "spurious wakeup\n");
+    fprintf(stderr, "trigger_event: spurious wakeup\n");
     return;
   }
   local->first = ev->Next();
@@ -57,17 +61,20 @@ void trigger_event (uv_async_t *h)
 
   if (!ev->Lock())
   {
-    pthread_mutex_unlock(&local->lck_queue);
-    fprintf(stderr, "trigger_event event lock failure!\n");
+    fprintf(stderr, "trigger_event: event lock failed\n");
+
+    if (pthread_mutex_unlock(&local->lck_queue))
+    {
+      fprintf(stderr, "trigger_event: queue unlocked failed\n");
+    }
     return;
   }
 
-  // debug event queue (must be holding queue lock!)
-  local->qsz--;
-  fprintf(stderr, "trigger_event eid=#%d queued=%d\n", ev->eid, local->qsz);
-
   // XXX: for top speed, move queue unlock to this point (with or without event lock success)
-  pthread_mutex_unlock(&local->lck_queue);
+  if (pthread_mutex_unlock(&local->lck_queue))
+  {
+    fprintf(stderr, "trigger_event: queue unlock failed\n");
+  }
 
   // launch the appropriate node.js callback for the given event
   ev->Fire(isolate, local);
@@ -88,21 +95,22 @@ int generate_event (envelope_t *env, MilterEvent *event)
   // lock the queue
   if (pthread_mutex_lock(&local->lck_queue))
   {
-    fprintf(stderr, "node-milter: generate_event: queue lock failed\n");
+    fprintf(stderr, "generate_event: queue lock failed\n");
     return SMFIS_TEMPFAIL;
   }
 
   // lock the event
   if (!event->Lock())
   {
-    pthread_mutex_unlock(&local->lck_queue);
-    // TODO: handle error
+    if (pthread_mutex_unlock(&local->lck_queue))
+    {
+      fprintf(stderr, "generate_event: queue unlock failed\n");
+      // TODO: handle error?
+    }
 
-    fprintf(stderr, "node-milter: generate_event: event lock failed\n");
+    fprintf(stderr, "generate_event: event lock failed\n");
     return SMFIS_TEMPFAIL;
   }
-
-  event->eid = local->eidgen;
 
   // enqueue the event while holding both locks
   if (NULL == local->last)
@@ -116,14 +124,12 @@ int generate_event (envelope_t *env, MilterEvent *event)
     local->last = event;
   }
 
-  // increment event counter and queue size
-  local->eidgen++;
-  local->qsz++;
-
-  fprintf(stderr, "generate_event: queued=%d\n", local->qsz);
-
   // unlock the queue to allow other libmilter threads to append events to it
-  pthread_mutex_unlock(&local->lck_queue);
+  if (pthread_mutex_unlock(&local->lck_queue))
+  {
+    // TODO: handle error?
+    fprintf(stderr, "generate_event: queue unlock failed\n");
+  }
 
   for (;;)
   {
@@ -134,13 +140,16 @@ int generate_event (envelope_t *env, MilterEvent *event)
     event->Wait();
     // TODO: check error condition
     if (event->IsDone()) break;
-    fprintf(stderr, "node-milter: incomplete task, spurious wakeup\n");
+    fprintf(stderr, "generate_event: incomplete task, spurious wakeup\n");
   }
   // retrieve return code
   retval = event->Result();
 
-  event->Unlock();
-  // TODO: check error condition
+  if (!event->Unlock())
+  {
+    // TODO: handle error?
+    fprintf(stderr, "generate_event: event unlock failed\n");
+  }
 
   return retval;
 }
@@ -375,26 +384,14 @@ sfsistat fi_close (SMFICTX *context)
 
   MilterClose *event = new MilterClose(env);
 #ifdef DEBUG_MILTEREVENT
-  fprintf(stderr, "fi_close begin\n");
+  fprintf(stderr, "close\n");
 #endif
   retval = generate_event(env, event);
-#ifdef DEBUG_MILTEREVENT
-  fprintf(stderr, "fi_close end\n");
-#endif
   delete event;
-#ifdef DEBUG_MILTEREVENT
-  fprintf(stderr, "fi_close: event free'd\n");
-#endif
 
   // final teardown sequence
   delete env;
-#ifdef DEBUG_MILTEREVENT
-  fprintf(stderr, "fi_close: envelope free'd\n");
-#endif
   smfi_setpriv(context, NULL);
-#ifdef DEBUG_MILTEREVENT
-  fprintf(stderr, "fi_close: privdata cleared\n");
-#endif
 
   return retval;
 }

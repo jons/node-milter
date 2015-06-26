@@ -9,8 +9,6 @@
  * hahaha!
  */
 
-#include <stdio.h>
-#include <string.h>
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <assert.h>
@@ -101,8 +99,6 @@ bool MilterEvent::Done (Isolate *isolate, int retval)
  */
 void MilterEvent::Prefire (Isolate *isolate, HandleScope &scope)
 {
-  fprintf(stderr, "restore prefire\n");
-
   this->envelope = Local<Object>::New(isolate, this->fi_envelope->object);
 }
 
@@ -111,7 +107,7 @@ void MilterEvent::Prefire (Isolate *isolate, HandleScope &scope)
  */
 void MilterEvent::Postfire (Isolate *isolate)
 {
-  fprintf(stderr, "do-nothing postfire\n");
+  // naaaah-thing
 }
 
 
@@ -158,8 +154,6 @@ MilterConnect::MilterConnect (envelope_t *env, const char *host, sockaddr_in *sa
 void MilterConnect::Prefire (Isolate *isolate, HandleScope &scope)
 {
   char debugenv[1024] = {'\0'};
-
-  fprintf(stderr, "connect prefire\n");
 
   this->envelope = Envelope::NewInstance(isolate, scope);
 
@@ -366,7 +360,5 @@ void MilterClose::FireWrapper (Isolate *isolate, bindings_t *local)
  */
 void MilterClose::Postfire (Isolate *isolate)
 {
-  fprintf(stderr, "close postfire\n");
-
   this->fi_envelope->object.Reset();
 }
