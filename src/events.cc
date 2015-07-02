@@ -185,12 +185,7 @@ bool MilterNegotiate::IsNegotiate () const { return true; }
 void MilterNegotiate::Prefire (Isolate *isolate, HandleScope &scope)
 {
   this->envelope = Envelope::NewInstance(isolate, scope);
-  //this->envelope->Ref();
-}
-
-void MilterNegotiate::Postfire (Isolate *isolate)
-{
-  //this->envelope->Unref();
+  this->fi_envelope->object.Reset(isolate, this->envelope);
 }
 
 /**
@@ -229,26 +224,6 @@ MilterConnect::MilterConnect (envelope_t *env, const char *host, sockaddr_in *sa
 }
 
 bool MilterConnect::IsConnect () const { return true; }
-
-/**
- * connect prefire creates an envelope, instead of recovering the existing one
- */
-void MilterConnect::Prefire (Isolate *isolate, HandleScope &scope)
-{
-  this->envelope = Envelope::NewInstance(isolate, scope);
-
-  // TODO: add relevant and meaningful contextual information? like connection time?
-
-  /**
-   * an empty object, envelope.local, which the implementor is free to change
-   * the contents of. they should not create their own top-level envelope
-   * fields, as this may interfere with future changes
-   */
-  this->envelope->Set(String::NewFromUtf8(isolate, "local", String::kInternalizedString), Object::New(isolate));
-
-  this->fi_envelope->object.Reset(isolate, this->envelope);
-}
-
 
 /**
  */

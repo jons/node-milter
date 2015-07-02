@@ -126,7 +126,6 @@ class MilterNegotiate : public MilterEvent
 
   protected:
     void Prefire (Isolate *isolate, HandleScope &scope);
-    void Postfire (Isolate *isolate);
 
   private:
     unsigned long f0;
@@ -160,7 +159,6 @@ class MilterConnect : public MilterEvent
     const char *Address() const;
 
   protected:
-    void Prefire (Isolate *isolate, HandleScope &scope);
 
   private:
     const char *sz_host;

@@ -7,12 +7,29 @@ process.on('uncaughtException', function (e) { console.log(e); });
 
 /**
  */
+function negotiate (envelope, f0, f1, f2, f3)
+{
+  envelope.local.sid = crypto.randomBytes(2).toString('hex');
+
+  console.log("[" + envelope.local.sid + "] filter session created");
+  console.log("[" + envelope.local.sid + "] f0=" + f0);
+  console.log("[" + envelope.local.sid + "] f1=" + f1);
+  console.log("[" + envelope.local.sid + "] f2=" + f2);
+  console.log("[" + envelope.local.sid + "] f3=" + f3);
+
+  f2 = 0;
+  f3 = 0;
+  envelope.negotiate(f0, f1, f2, f3);
+  envelope.done(milter.SMFIS_ALL_OPTS);
+}
+
+/**
+ */
 function connect (envelope, host, address)
 {
-  envelope.ts_start = (new Date).getTime();
-  envelope.sid = crypto.randomBytes(2).toString('hex');
+  envelope.local.ts_start = (new Date).getTime();
 
-  console.log("[" + envelope.sid + "-" + envelope.debugenv + "] connection from " + host + " (" + address + ")");
+  console.log("[" + envelope.local.sid + "] connection from " + host + " (" + address + ")");
   envelope.done(milter.SMFIS_CONTINUE);
 }
 
@@ -22,7 +39,7 @@ function connect (envelope, host, address)
 function helo (envelope, identity)
 {
   global.gc();
-  console.log("[" + envelope.sid + "-" + envelope.debugenv + "] helo " + identity);
+  console.log("[" + envelope.local.sid + "] helo " + identity);
   envelope.done(milter.SMFIS_CONTINUE);
 }
 
@@ -44,8 +61,8 @@ function abort (envelope)    { envelope.done(milter.SMFIS_CONTINUE); }
 function close (envelope)
 {
   var now = (new Date).getTime();
-  console.log("[" + envelope.sid + "-" + envelope.debugenv + "] connection closed");
-  console.log("[" + envelope.sid + "-" + envelope.debugenv + "] session lasted " + (now - envelope.ts_start) + " msec");
+  console.log("[" + envelope.local.sid + "] connection closed");
+  console.log("[" + envelope.local.sid + "] session lasted " + (now - envelope.local.ts_start) + " msec");
   envelope.done(milter.SMFIS_CONTINUE);
 }
 
@@ -59,6 +76,7 @@ var ok = milter.start(
   // register flags. see smfi_register for details
   milter.SMFIF_QUARANTINE | milter.SMFIF_ADDHDRS | milter.SMFIF_CHGFROM,
 
+  negotiate, // milter-to-MTA negotiation
   connect,  // connection event
   unknown,  // unknown client command
   helo,     // client "HELO" or "EHLO" i presume

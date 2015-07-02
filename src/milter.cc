@@ -175,16 +175,18 @@ sfsistat fi_negotiate (SMFICTX *context,
 {
   bindings_t *local = (bindings_t *)smfi_getpriv(context);
   int retval = SMFIS_ALL_OPTS;
-  envelope_t tmpenv (local);
 
-  //MilterNegotiate *event = new MilterNegotiate(&tmpenv, f0, f1, f2, f3, pf0, pf1, pf2, pf3);
+  // envelope initializer
+  // links future events in this thread to the same envelope in node.js
+  envelope_t *env = new envelope_t(local);
+  smfi_setpriv(context, env);
+
+  MilterNegotiate *event = new MilterNegotiate(env, f0, f1, f2, f3, pf0, pf1, pf2, pf3);
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "negotiate %lu %lu %lu %lu\n", f0, f1, f2, f3);
 #endif
-  //retval = generate_event(context, local, event);
-
-  *pf2 = 0;
-  *pf3 = 0;
+  retval = generate_event(context, local, event);
+  delete event;
   return retval;
 }
 
@@ -194,20 +196,14 @@ sfsistat fi_negotiate (SMFICTX *context,
  */
 sfsistat fi_connect (SMFICTX *context, char *host, _SOCK_ADDR *sa)
 {
-  bindings_t *local = (bindings_t *)smfi_getpriv(context);
+  envelope_t *env = (envelope_t *)smfi_getpriv(context);
   int retval;
 
-  // envelope initializer
-  // links future events in this thread to the same envelope in node.js
-  envelope_t *env = new envelope_t(local);
-  smfi_setpriv(context, env);
-
-  // create event, deliver event, block, cleanup
   MilterConnect *event = new MilterConnect(env, host, (sockaddr_in *)sa);
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "connect \"%s\" \"%s\"\n", event->Host(), event->Address());
 #endif
-  retval = generate_event(context, local, event);
+  retval = generate_event(context, env->local, event);
   delete event;
   return retval;
 }
@@ -511,7 +507,7 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
   desc.xxfi_flags = args[1]->ToNumber()->IntegerValue();
 
   // ya dats lazy
-  for (int i = 2; i < 14; i++)
+  for (int i = 2; i < 15; i++)
     if (!args[i]->IsFunction())
     {
       isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Invalid argument: expected function")));
@@ -522,18 +518,19 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
   char *c_connstr = new char[connstr->Utf8Length()+1];
   connstr->WriteUtf8(c_connstr);
 
-  local->fcall.connect.Reset (isolate, Local<Function>::Cast(args[2]));
-  local->fcall.unknown.Reset (isolate, Local<Function>::Cast(args[3]));
-  local->fcall.helo.Reset    (isolate, Local<Function>::Cast(args[4]));
-  local->fcall.envfrom.Reset (isolate, Local<Function>::Cast(args[5]));
-  local->fcall.envrcpt.Reset (isolate, Local<Function>::Cast(args[6]));
-  local->fcall.data.Reset    (isolate, Local<Function>::Cast(args[7]));
-  local->fcall.header.Reset  (isolate, Local<Function>::Cast(args[8]));
-  local->fcall.eoh.Reset     (isolate, Local<Function>::Cast(args[9]));
-  local->fcall.body.Reset    (isolate, Local<Function>::Cast(args[10]));
-  local->fcall.eom.Reset     (isolate, Local<Function>::Cast(args[11]));
-  local->fcall.abort.Reset   (isolate, Local<Function>::Cast(args[12]));
-  local->fcall.close.Reset   (isolate, Local<Function>::Cast(args[13]));
+  local->fcall.negotiate.Reset (isolate, Local<Function>::Cast(args[2]));
+  local->fcall.connect.Reset   (isolate, Local<Function>::Cast(args[3]));
+  local->fcall.unknown.Reset   (isolate, Local<Function>::Cast(args[4]));
+  local->fcall.helo.Reset      (isolate, Local<Function>::Cast(args[5]));
+  local->fcall.envfrom.Reset   (isolate, Local<Function>::Cast(args[6]));
+  local->fcall.envrcpt.Reset   (isolate, Local<Function>::Cast(args[7]));
+  local->fcall.data.Reset      (isolate, Local<Function>::Cast(args[8]));
+  local->fcall.header.Reset    (isolate, Local<Function>::Cast(args[9]));
+  local->fcall.eoh.Reset       (isolate, Local<Function>::Cast(args[10]));
+  local->fcall.body.Reset      (isolate, Local<Function>::Cast(args[11]));
+  local->fcall.eom.Reset       (isolate, Local<Function>::Cast(args[12]));
+  local->fcall.abort.Reset     (isolate, Local<Function>::Cast(args[13]));
+  local->fcall.close.Reset     (isolate, Local<Function>::Cast(args[14]));
 
   bool ok = false;
   if (MI_SUCCESS == smfi_register(desc))

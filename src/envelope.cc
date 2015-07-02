@@ -66,6 +66,7 @@ Local<Object> Envelope::NewInstance (Isolate *isolate, HandleScope &scope)
   Handle<Value> argv[0] = { };
   Local<Function> cons = Local<Function>::New(isolate, constructor);
   Local<Object> envelope = cons->NewInstance(0, argv);
+  envelope->Set(String::NewFromUtf8(isolate, "local", String::kInternalizedString), Object::New(isolate));
   //envelope->Ref();
   return envelope;
 }
