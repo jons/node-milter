@@ -1,31 +1,6 @@
 # node-milter
 node.js bindings for postfix milters
 
-    milter.start(
-      string smtpd_milter_description,
-      function(env,host,addr) connect,
-      function(env,command) unknown,
-      function(env,identity) helo,
-      function(env,address) mailfrom,
-      function(env,address) rcptto,
-      function(env) data,
-      function(env,name,value) header,
-      function(env) eoh,
-      function(env,buffer,length) segment,
-      function(env) eom,
-      function(env) abort,
-      function(env) close,
-    );
-    
-    milter.SMFIS_CONTINUE
-    milter.SMFIS_REJECT
-    milter.SMFIS_DISCARD
-    milter.SMFIS_ACCEPT
-    milter.SMFIS_TEMPFAIL
-    milter.SMFIS_NOREPLY
-    milter.SMFIS_SKIP
-
-
 this addon produces libmilter callbacks in node.js so that you don't have to be
 a C programmer to use postfix with libmilter.
 
@@ -51,7 +26,106 @@ js objects, and so on. but it is required that the js callbacks return a
 decision for postfix immediately, so your js callbacks cannot be async (yet).
 
 
+QUICKSTART
+
+creating a milter daemon.
+
+    milter.start(
+      string smtpd_milter_description,
+      number flags,
+      function(env, f0, f1, f2, f3) negotiate,
+      function(env,host,addr) connect,
+      function(env,command) unknown,
+      function(env,identity) helo,
+      function(env,address) mailfrom,
+      function(env,address) rcptto,
+      function(env) data,
+      function(env,name,value) header,
+      function(env) eoh,
+      function(env,buffer,length) segment,
+      function(env) eom,
+      function(env) abort,
+      function(env) close,
+    );
+
+
+other controls are available when creating a milter.
+
+completing a callback.
+
+    connect = function (env, host, addr) {
+      /* ... */
+      env.done(decision);
+    }
+
+
+the allowed filter decisions for all callbacks except negotiate.
+    
+    milter.SMFIS_CONTINUE
+    milter.SMFIS_REJECT
+    milter.SMFIS_DISCARD
+    milter.SMFIS_ACCEPT
+    milter.SMFIS_TEMPFAIL
+    milter.SMFIS_NOREPLY
+    milter.SMFIS_SKIP
+
+
+negotiate shall return one of these decisions instead. see env.negotiate() for
+use of the CONTINUE return code.
+
+    milter.SMFIS_ALL_OPTS
+    milter.SMFIS_CONTINUE
+    milter.SMFIS_REJECT
+
+
+other envelope methods.
+access to message modifiers is allowed during the EOM event with these methods.
+
+    env.addheader(name, value)
+    env.chgheader(name, refcount, value)
+    env.insheader(index, name, value)
+    env.replacebody(newbody)
+    env.addrcpt(recipient)
+    env.addrcpt_par(recipient, args)
+    env.delrcpt(recipient)
+    env.chgfrom(envfrom, args)
+    env.quarantine(reason)
+    env.progress()
+
+
+changing the symbol list is allowed during negotiate.
+
+    env.setsymlist(stage, macrolist)
+
+
+because pointers cannot be wrapped in node.js addons, an additional method in
+the addon implementation that has no analog in libmilter exists to facilitate
+changing these settings so that the pointers made available to the xxfi_negotiate
+callback can be changed after node.js returns control to libmilter. call this
+method BEFORE calling env.done(), also, the values changed by this function are
+ignored unless env.done() is called with SMFIS_CONTINUE.
+
+    env.negotiate(f0, f1, f2, f3)
+
+
+retrieving a macro is allowed during any event. will return an empty string if
+the macro doesn't have a value.
+
+    env.getsymval(symname)
+
+
+changing the server's smtp reply is allowed during any event other than connect.
+i believe this should also exclude negotiate, so i enforce that as well.
+
+    env.setreply(rcode, xcode, message)
+    env.setmlreply(rcode, xcode, lines)
+
+
 ANOMALIES
+
+libmilter uses globals and is not thread-safe. you cannot use multiprocessing
+features in node with this addon.
+
 
 the milter will register in postfix with the name "node-bindings". the name
 "node-milter" is intended to give the project a sensible npm identity.

@@ -8,7 +8,7 @@
  *
  * hahaha!
  */
-
+#include <string.h>
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <assert.h>
@@ -55,6 +55,12 @@ void MilterEvent::Detatch ()
 
 MilterEvent *MilterEvent::Next () const { return this->ev_next; }
 
+void MilterEvent::SetMilterContext (SMFICTX *context)
+{
+  assert(NULL != context);
+  this->smfi_context = context;
+}
+
 bool MilterEvent::IsDone () const { return this->is_done; }
 
 int MilterEvent::Result () const { return this->fi_retval; }
@@ -92,6 +98,24 @@ bool MilterEvent::Done (Isolate *isolate, int retval)
 
 
 /**
+ * caling envelope.whatever() outside of certain events is largely forbidden
+ */
+bool MilterEvent::IsNegotiate () const
+{
+  return false;
+}
+bool MilterEvent::IsConnect () const
+{
+  return false;
+}
+bool MilterEvent::IsEndMessage () const
+{
+  return false;
+}
+
+
+
+/**
  * the default prefire event
  *
  * must be called during trigger_event
@@ -120,6 +144,7 @@ void MilterEvent::Fire (Isolate *isolate, bindings_t *local)
 
   Envelope *env = ObjectWrap::Unwrap<Envelope>(this->envelope);
   env->SetCurrentEvent(this);
+  env->SetMilterContext(this->smfi_context);
 
   this->FireWrapper(isolate, local);
 }
@@ -139,6 +164,62 @@ void MilterEvent::DoFCall (Isolate *isolate, Persistent<Function> &pfunc, unsign
 }
 
 
+/** MilterNegotiate ***********************************************************/
+
+MilterNegotiate::MilterNegotiate (envelope_t *env,
+    unsigned long f0_,
+    unsigned long f1_,
+    unsigned long f2_,
+    unsigned long f3_,
+    unsigned long *pf0_,
+    unsigned long *pf1_,
+    unsigned long *pf2_,
+    unsigned long *pf3_)
+  : MilterEvent(env), f0(f0_), f1(f1_), f2(f2_), f3(f3_), pf0(pf0_), pf1(pf1_), pf2(pf2_), pf3(pf3_)
+{
+  //
+}
+
+bool MilterNegotiate::IsNegotiate () const { return true; }
+
+void MilterNegotiate::Prefire (Isolate *isolate, HandleScope &scope)
+{
+  this->envelope = Envelope::NewInstance(isolate, scope);
+  //this->envelope->Ref();
+}
+
+void MilterNegotiate::Postfire (Isolate *isolate)
+{
+  //this->envelope->Unref();
+}
+
+/**
+ */
+void MilterNegotiate::FireWrapper (Isolate *isolate, bindings_t *local)
+{
+  const unsigned argc = 5;
+  Local<Value> argv[argc] = {
+    this->envelope,
+    Number::New(isolate, this->f0),
+    Number::New(isolate, this->f1),
+    Number::New(isolate, this->f2),
+    Number::New(isolate, this->f3)
+  };
+  this->DoFCall(isolate, local->fcall.negotiate, argc, argv);
+}
+
+
+/**
+ */
+void MilterNegotiate::Negotiate(unsigned long f0, unsigned long f1, unsigned long f2, unsigned long f3)
+{
+  *pf0 = f0;
+  *pf1 = f1;
+  *pf2 = f2;
+  *pf3 = f3;
+}
+
+
 /** MilterConnect *************************************************************/
 
 MilterConnect::MilterConnect (envelope_t *env, const char *host, sockaddr_in *sa)
@@ -147,19 +228,23 @@ MilterConnect::MilterConnect (envelope_t *env, const char *host, sockaddr_in *sa
   inet_ntop(AF_INET, &((sockaddr_in *)sa)->sin_addr, sz_addr, sizeof sz_addr);
 }
 
+bool MilterConnect::IsConnect () const { return true; }
 
 /**
  * connect prefire creates an envelope, instead of recovering the existing one
  */
 void MilterConnect::Prefire (Isolate *isolate, HandleScope &scope)
 {
-  char debugenv[1024] = {'\0'};
-
   this->envelope = Envelope::NewInstance(isolate, scope);
 
-  // TODO: add relevant and meaningful contextual information
-  snprintf(debugenv, sizeof(debugenv)-1, "%p", this);
-  this->envelope->Set(String::NewFromUtf8(isolate, "debugenv", String::kInternalizedString), String::NewFromUtf8(isolate, debugenv));
+  // TODO: add relevant and meaningful contextual information? like connection time?
+
+  /**
+   * an empty object, envelope.local, which the implementor is free to change
+   * the contents of. they should not create their own top-level envelope
+   * fields, as this may interfere with future changes
+   */
+  this->envelope->Set(String::NewFromUtf8(isolate, "local", String::kInternalizedString), Object::New(isolate));
 
   this->fi_envelope->object.Reset(isolate, this->envelope);
 }
@@ -303,13 +388,13 @@ MilterMessageData::MilterMessageData (envelope_t *env, const unsigned char *buf,
 void MilterMessageData::FireWrapper (Isolate *isolate, bindings_t *local)
 {
   char *nodebuf = new char[len];
+  memcpy(nodebuf, buf, len);
   const unsigned argc = 3;
   Local<Value> argv[argc] = {
     this->envelope,
     Buffer::Use(isolate, nodebuf, len),
     Number::New(isolate, len)
   };
-  // TODO: copy buf into nodebuf
   this->DoFCall(isolate, local->fcall.body, argc, argv);
 }
 
@@ -317,6 +402,8 @@ void MilterMessageData::FireWrapper (Isolate *isolate, bindings_t *local)
 /** MilterEndMessage ***************************************************************/
 
 MilterEndMessage::MilterEndMessage (envelope_t *env) : MilterEvent(env) { }
+
+bool MilterEndMessage::IsEndMessage () const { return true; }
 
 void MilterEndMessage::FireWrapper (Isolate *isolate, bindings_t *local)
 {

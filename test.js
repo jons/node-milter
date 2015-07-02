@@ -53,7 +53,12 @@ function close (envelope)
 /** main **********************************************************************/
 
 var ok = milter.start(
-  "inet:12345", // see postconf(5) "smtpd_milters" for details
+  // setconn. see postconf(5) "smtpd_milters" for details
+  "inet:12345",
+
+  // register flags. see smfi_register for details
+  milter.SMFIF_QUARANTINE | milter.SMFIF_ADDHDRS | milter.SMFIF_CHGFROM,
+
   connect,  // connection event
   unknown,  // unknown client command
   helo,     // client "HELO" or "EHLO" i presume

@@ -21,8 +21,6 @@ using namespace node;
 
 static const char *g_name = "node-bindings";
 
-static int g_flags = SMFIF_QUARANTINE;
-
 
 /** demultiplexer *************************************************************/
 
@@ -87,9 +85,8 @@ void trigger_event (uv_async_t *h)
 /**
  * queue an event from the libmilter side.
  */
-int generate_event (envelope_t *env, MilterEvent *event)
+int generate_event (SMFICTX *context, bindings_t *local, MilterEvent *event)
 {
-  bindings_t *local = env->local;
   int retval;
 
   // lock the queue
@@ -130,6 +127,9 @@ int generate_event (envelope_t *env, MilterEvent *event)
     // TODO: handle error?
     fprintf(stderr, "generate_event: queue unlock failed\n");
   }
+
+  // give the event control of the libmilter context
+  event->SetMilterContext(context);
 
   for (;;)
   {
@@ -173,9 +173,19 @@ sfsistat fi_negotiate (SMFICTX *context,
                            unsigned long *pf2,
                            unsigned long *pf3)
 {
+  bindings_t *local = (bindings_t *)smfi_getpriv(context);
+  int retval = SMFIS_ALL_OPTS;
+  envelope_t tmpenv (local);
+
+  //MilterNegotiate *event = new MilterNegotiate(&tmpenv, f0, f1, f2, f3, pf0, pf1, pf2, pf3);
+#ifdef DEBUG_MILTEREVENT
+  fprintf(stderr, "negotiate %lu %lu %lu %lu\n", f0, f1, f2, f3);
+#endif
+  //retval = generate_event(context, local, event);
+
   *pf2 = 0;
   *pf3 = 0;
-  return SMFIS_ALL_OPTS;
+  return retval;
 }
 
 
@@ -197,7 +207,7 @@ sfsistat fi_connect (SMFICTX *context, char *host, _SOCK_ADDR *sa)
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "connect \"%s\" \"%s\"\n", event->Host(), event->Address());
 #endif
-  retval = generate_event(env, event);
+  retval = generate_event(context, local, event);
   delete event;
   return retval;
 }
@@ -213,7 +223,7 @@ sfsistat fi_unknown (SMFICTX *context, const char *command)
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "unknown \"%s\"\n", command);
 #endif
-  retval = generate_event(env, event);
+  retval = generate_event(context, env->local, event);
   delete event;
   return retval;
 }
@@ -229,7 +239,7 @@ sfsistat fi_helo (SMFICTX *context, char *helo)
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "helo \"%s\"\n", helo);
 #endif
-  retval = generate_event(env, event);
+  retval = generate_event(context, env->local, event);
   delete event;
   return retval;
 }
@@ -246,7 +256,7 @@ sfsistat fi_envfrom (SMFICTX *context, char **argv)
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "envfrom \"%s\"\n", argv[0]); // argv[0] is guaranteed
 #endif
-  retval = generate_event(env, event);
+  retval = generate_event(context, env->local, event);
   delete event;
   return retval;
 }
@@ -263,7 +273,7 @@ sfsistat fi_envrcpt (SMFICTX *context, char **argv)
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "envrcpt \"%s\"\n", argv[0]); // argv[0] is guaranteed
 #endif
-  retval = generate_event(env, event);
+  retval = generate_event(context, env->local, event);
   delete event;
   return retval;
 }
@@ -280,7 +290,7 @@ sfsistat fi_data (SMFICTX *context)
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "data\n");
 #endif
-  retval = generate_event(env, event);
+  retval = generate_event(context, env->local, event);
   delete event;
   return retval;
 }
@@ -297,7 +307,7 @@ sfsistat fi_header (SMFICTX *context, char *name, char *value)
 #ifdef DEBUG_MILTEREVENT_HEADERS_TOO
   fprintf(stderr, "header \"%s\" \"%s\"\n", name, value);
 #endif
-  retval = generate_event(env, event);
+  retval = generate_event(context, env->local, event);
   delete event;
   return retval;
 }
@@ -314,7 +324,7 @@ sfsistat fi_eoh (SMFICTX *context)
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "eoh\n");
 #endif
-  retval = generate_event(env, event);
+  retval = generate_event(context, env->local, event);
   delete event;
   return retval;
 }
@@ -332,7 +342,7 @@ sfsistat fi_body (SMFICTX *context, unsigned char *segment, size_t len)
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "message-data (%lu bytes)\n", len);
 #endif
-  retval = generate_event(env, event);
+  retval = generate_event(context, env->local, event);
   delete event;
   return retval;
 }
@@ -349,7 +359,7 @@ sfsistat fi_eom (SMFICTX *context)
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "eom\n");
 #endif
-  retval = generate_event(env, event);
+  retval = generate_event(context, env->local, event);
   delete event;
   return retval;
 }
@@ -369,7 +379,7 @@ sfsistat fi_abort (SMFICTX *context)
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "abort\n");
 #endif
-  retval = generate_event(env, event);
+  retval = generate_event(context, env->local, event);
   delete event;
   return retval;
 }
@@ -381,12 +391,11 @@ sfsistat fi_close (SMFICTX *context)
 {
   envelope_t *env = (envelope_t *)smfi_getpriv(context);
   int retval;
-
   MilterClose *event = new MilterClose(env);
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "close\n");
 #endif
-  retval = generate_event(env, event);
+  retval = generate_event(context, env->local, event);
   delete event;
 
   // final teardown sequence
@@ -427,7 +436,7 @@ void milter_cleanup (uv_work_t *request, int status)
   // immediately stop event delivery
   uv_close((uv_handle_t *)&local->trigger, NULL);
 
-  //local->fcall.negotiate.Reset();
+  local->fcall.negotiate.Reset();
   local->fcall.connect.Reset();
   local->fcall.unknown.Reset();
   local->fcall.helo.Reset();
@@ -460,7 +469,7 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
 
   desc.xxfi_name      =(char *)g_name;
   desc.xxfi_version   = SMFI_VERSION;
-  desc.xxfi_flags     = g_flags;
+  desc.xxfi_flags     = 0;
   desc.xxfi_negotiate = fi_negotiate;
   desc.xxfi_connect   = fi_connect;
   desc.xxfi_unknown   = fi_unknown;
@@ -483,7 +492,7 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
   local->request.data = local;
   local->trigger.data = local;
 
-  if (args.Length() < 13)
+  if (args.Length() < 14)
   {
     isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Wrong number of arguments")));
     return;
@@ -493,8 +502,16 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
     isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Invalid argument: expected string")));
     return;
   }
+  if (!args[1]->IsNumber())
+  {
+    isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Invalid argument: expected number")));
+    return;
+  }
+
+  desc.xxfi_flags = args[1]->ToNumber()->IntegerValue();
+
   // ya dats lazy
-  for (int i = 1; i < 13; i++)
+  for (int i = 2; i < 14; i++)
     if (!args[i]->IsFunction())
     {
       isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Invalid argument: expected function")));
@@ -504,21 +521,21 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
   Local<String> connstr = args[0]->ToString();
   char *c_connstr = new char[connstr->Utf8Length()+1];
   connstr->WriteUtf8(c_connstr);
+
+  local->fcall.connect.Reset (isolate, Local<Function>::Cast(args[2]));
+  local->fcall.unknown.Reset (isolate, Local<Function>::Cast(args[3]));
+  local->fcall.helo.Reset    (isolate, Local<Function>::Cast(args[4]));
+  local->fcall.envfrom.Reset (isolate, Local<Function>::Cast(args[5]));
+  local->fcall.envrcpt.Reset (isolate, Local<Function>::Cast(args[6]));
+  local->fcall.data.Reset    (isolate, Local<Function>::Cast(args[7]));
+  local->fcall.header.Reset  (isolate, Local<Function>::Cast(args[8]));
+  local->fcall.eoh.Reset     (isolate, Local<Function>::Cast(args[9]));
+  local->fcall.body.Reset    (isolate, Local<Function>::Cast(args[10]));
+  local->fcall.eom.Reset     (isolate, Local<Function>::Cast(args[11]));
+  local->fcall.abort.Reset   (isolate, Local<Function>::Cast(args[12]));
+  local->fcall.close.Reset   (isolate, Local<Function>::Cast(args[13]));
+
   bool ok = false;
-
-  local->fcall.connect.Reset (isolate, Local<Function>::Cast(args[1]));
-  local->fcall.unknown.Reset (isolate, Local<Function>::Cast(args[2]));
-  local->fcall.helo.Reset    (isolate, Local<Function>::Cast(args[3]));
-  local->fcall.envfrom.Reset (isolate, Local<Function>::Cast(args[4]));
-  local->fcall.envrcpt.Reset (isolate, Local<Function>::Cast(args[5]));
-  local->fcall.data.Reset    (isolate, Local<Function>::Cast(args[6]));
-  local->fcall.header.Reset  (isolate, Local<Function>::Cast(args[7]));
-  local->fcall.eoh.Reset     (isolate, Local<Function>::Cast(args[8]));
-  local->fcall.body.Reset    (isolate, Local<Function>::Cast(args[9]));
-  local->fcall.eom.Reset     (isolate, Local<Function>::Cast(args[10]));
-  local->fcall.abort.Reset   (isolate, Local<Function>::Cast(args[11]));
-  local->fcall.close.Reset   (isolate, Local<Function>::Cast(args[12]));
-
   if (MI_SUCCESS == smfi_register(desc))
   {
     if (MI_SUCCESS == smfi_setconn(c_connstr))
@@ -533,9 +550,22 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
 
   if (!ok)
   {
+    local->fcall.negotiate.Reset();
+    local->fcall.connect.Reset();
+    local->fcall.unknown.Reset();
+    local->fcall.helo.Reset();
+    local->fcall.envfrom.Reset();
+    local->fcall.envrcpt.Reset();
+    local->fcall.data.Reset();
+    local->fcall.header.Reset();
+    local->fcall.eoh.Reset();
+    local->fcall.body.Reset();
+    local->fcall.eom.Reset();
+    local->fcall.abort.Reset();
+    local->fcall.close.Reset();
     delete local;
 
-    // TODO: throw exception? report error?
+    // TODO: throw exception?
   }
 
   args.GetReturnValue().Set(Boolean::New(isolate, ok));
@@ -620,11 +650,33 @@ void milter_stop (const FunctionCallbackInfo<Value> &args)
 
 
 /**
+ */
+void milter_version (const FunctionCallbackInfo<Value> &args)
+{
+  Isolate *isolate = Isolate::GetCurrent();
+  HandleScope scope (isolate);
+  unsigned int major, minor, patchlevel;
+
+  smfi_version(&major, &minor, &patchlevel);
+
+  Local<Array> r = Array::New(isolate);
+  r->Set(0, Number::New(isolate, major));
+  r->Set(1, Number::New(isolate, minor));
+  r->Set(2, Number::New(isolate, patchlevel));
+  args.GetReturnValue().Set(r);
+}
+
+
+/**
  * module initialization
  */
 void init (Handle<Object> target, Handle<Value> module, Handle<Context> context)
 {
   Isolate *isolate = Isolate::GetCurrent();
+
+  // return values from envelope functions
+  target->Set(String::NewFromUtf8(isolate, "MI_SUCCESS", String::kInternalizedString), Number::New(isolate, MI_SUCCESS));
+  target->Set(String::NewFromUtf8(isolate, "MI_FAILURE", String::kInternalizedString), Number::New(isolate, MI_FAILURE));
 
   // macro contexts/locations
   target->Set(String::NewFromUtf8(isolate, "SMFIM_CONNECT", String::kInternalizedString), Number::New(isolate, SMFIM_CONNECT));
@@ -667,6 +719,7 @@ void init (Handle<Object> target, Handle<Value> module, Handle<Context> context)
   NODE_SET_METHOD(target, "setdbg",     milter_setdbg);
   NODE_SET_METHOD(target, "settimeout", milter_settimeout);
   NODE_SET_METHOD(target, "stop",       milter_stop);
+  NODE_SET_METHOD(target, "version",    milter_version);
 }
 
 NODE_MODULE_CONTEXT_AWARE(milter, init)

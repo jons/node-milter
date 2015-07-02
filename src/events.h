@@ -34,7 +34,9 @@ class MilterEvent
      */
     void Fire (Isolate *isolate, bindings_t *local);
 
-    // control of the event
+    /**
+     * just a mutex; control of the event
+     */
     bool Lock ();
     bool Unlock ();
 
@@ -49,10 +51,24 @@ class MilterEvent
      */
     bool Done (Isolate *isolate, int retval);
 
+    /**
+     * allow an envelope function to ensure it is not being called at the wrong
+     * milter stage.
+     * most of them are allowed during EOM only.
+     */
+    virtual bool IsNegotiate () const;
+    virtual bool IsConnect() const;
+    virtual bool IsEndMessage () const;
+
     // linklist junk
     void Append (MilterEvent *ev);
     void Detatch ();
     MilterEvent *Next () const;
+
+    /**
+     * 
+     */
+    void SetMilterContext (SMFICTX *context);
 
     // not sure if needed
     bool IsDone () const;
@@ -79,6 +95,7 @@ class MilterEvent
     Local<Object> envelope;
 
     envelope_t *fi_envelope;
+    SMFICTX *smfi_context;
 
   private:
     MilterEvent *ev_next;
@@ -87,6 +104,39 @@ class MilterEvent
 
     pthread_mutex_t pt_lock;
     pthread_cond_t pt_ready;
+};
+
+
+/**
+ */
+class MilterNegotiate : public MilterEvent
+{
+  public:
+    MilterNegotiate (envelope_t *env,
+      unsigned long f0_, unsigned long f1_, unsigned long f2_, unsigned long f3_,
+      unsigned long *pf0_, unsigned long *pf1_, unsigned long *pf2_, unsigned long *pf3_);
+    void FireWrapper (Isolate *isolate, bindings_t *local);
+
+    bool IsNegotiate () const;
+
+    /**
+     * change negotiation settings
+     */
+    void Negotiate (unsigned long f0, unsigned long f1, unsigned long f2, unsigned long f3);
+
+  protected:
+    void Prefire (Isolate *isolate, HandleScope &scope);
+    void Postfire (Isolate *isolate);
+
+  private:
+    unsigned long f0;
+    unsigned long f1;
+    unsigned long f2;
+    unsigned long f3;
+    unsigned long *pf0;
+    unsigned long *pf1;
+    unsigned long *pf2;
+    unsigned long *pf3;
 };
 
 
@@ -103,6 +153,8 @@ class MilterConnect : public MilterEvent
   public:
     MilterConnect (envelope_t *env, const char *host, sockaddr_in *sa);
     void FireWrapper (Isolate *isolate, bindings_t *local);
+
+    bool IsConnect() const;
 
     const char *Host() const;
     const char *Address() const;
@@ -223,6 +275,8 @@ class MilterEndMessage : public MilterEvent
   public:
     MilterEndMessage (envelope_t *env);
     void FireWrapper (Isolate *isolate, bindings_t *local);
+
+    bool IsEndMessage () const;
 };
 
 

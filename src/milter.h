@@ -39,7 +39,7 @@ struct bindings
 
   struct
   {
-    //Persistent<Function> negotiate;
+    Persistent<Function> negotiate;
     Persistent<Function> connect;
     Persistent<Function> unknown;
     Persistent<Function> helo;
@@ -60,11 +60,16 @@ struct bindings
 
 struct envelope
 {
-  envelope (bindings_t *local) : local(local)
+  envelope (bindings_t *local)
+    : local(local)
   { }
 
   bindings_t *local;
 
+  /**
+   * this is an ObjectWrap'd Envelope
+   * it lives from connect to close
+   */
   Persistent<Object> object;
 };
 
