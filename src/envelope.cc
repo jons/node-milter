@@ -254,7 +254,7 @@ void Envelope::SMFI_SetReply (const FunctionCallbackInfo<Value> &args)
     isolate->ThrowException(Exception::Error(String::NewFromUtf8(isolate, "Envelope method called out of event context")));
     return;
   }
-  if (event->IsNegotiate() || event->IsConnect())
+  if (event->IsNegotiate() /*|| event->IsConnect()*/)
   {
     isolate->ThrowException(Exception::Error(String::NewFromUtf8(isolate, "Envelope method called from prohibited event context")));
     return;
