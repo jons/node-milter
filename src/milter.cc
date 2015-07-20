@@ -19,7 +19,16 @@ using namespace node;
 /** globals *******************************************************************/
 
 
+/**
+ * the name the milter registers with to the MTA.
+ */
 static const char *g_name = "node-bindings";
+
+
+/**
+ * the libmilter implementation and other application globals.
+ */
+bindings_t app;
 
 
 /** demultiplexer *************************************************************/
@@ -173,19 +182,18 @@ sfsistat fi_negotiate (SMFICTX *context,
                            unsigned long *pf2,
                            unsigned long *pf3)
 {
-  bindings_t *local = (bindings_t *)smfi_getpriv(context);
   int retval = SMFIS_ALL_OPTS;
 
   // envelope initializer
   // links future events in this thread to the same envelope in node.js
-  envelope_t *env = new envelope_t(local);
+  envelope_t *env = new envelope_t(&app);
   smfi_setpriv(context, env);
 
   MilterNegotiate *event = new MilterNegotiate(env, f0, f1, f2, f3, pf0, pf1, pf2, pf3);
 #ifdef DEBUG_MILTEREVENT
   fprintf(stderr, "negotiate %lu %lu %lu %lu\n", f0, f1, f2, f3);
 #endif
-  retval = generate_event(context, local, event);
+  retval = generate_event(context, &app, event);
   delete event;
   return retval;
 }
@@ -407,12 +415,11 @@ sfsistat fi_close (SMFICTX *context)
  */
 void milter_worker (uv_work_t *request)
 {
-  bindings_t *local = static_cast<bindings_t *>(request->data);
   int r;
-  r = smfi_main(local);
+  r = smfi_main();
   fprintf(stderr, "milter_worker finishing\n");
   // TODO: any concurrency issues here?
-  local->retval = r;
+  app.retval = r;
 }
 
 
@@ -425,30 +432,26 @@ void milter_cleanup (uv_work_t *request, int status)
   Locker locker (isolate);
   HandleScope scope (isolate);
 
-  bindings_t *local = static_cast<bindings_t *>(request->data);
-
   fprintf(stderr, "milter_cleanup started\n");
 
   // immediately stop event delivery
-  uv_close((uv_handle_t *)&local->trigger, NULL);
+  uv_close((uv_handle_t *)&(app.trigger), NULL);
 
-  local->fcall.negotiate.Reset();
-  local->fcall.connect.Reset();
-  local->fcall.unknown.Reset();
-  local->fcall.helo.Reset();
-  local->fcall.envfrom.Reset();
-  local->fcall.envrcpt.Reset();
-  local->fcall.data.Reset();
-  local->fcall.header.Reset();
-  local->fcall.eoh.Reset();
-  local->fcall.body.Reset();
-  local->fcall.eom.Reset();
-  local->fcall.abort.Reset();
-  local->fcall.close.Reset();
+  app.fcall.negotiate.Reset();
+  app.fcall.connect.Reset();
+  app.fcall.unknown.Reset();
+  app.fcall.helo.Reset();
+  app.fcall.envfrom.Reset();
+  app.fcall.envrcpt.Reset();
+  app.fcall.data.Reset();
+  app.fcall.header.Reset();
+  app.fcall.eoh.Reset();
+  app.fcall.body.Reset();
+  app.fcall.eom.Reset();
+  app.fcall.abort.Reset();
+  app.fcall.close.Reset();
 
   // TODO: call a "end" callback provided during instantiation? unsure how to do this, probably with a persistent function
-
-  delete local;
 }
 
 
@@ -460,7 +463,6 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
   Locker locker (isolate);
   HandleScope scope(isolate);
 
-  bindings_t *local = new bindings_t();
   struct smfiDesc desc;
 
   desc.xxfi_name      =(char *)g_name;
@@ -485,8 +487,8 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
 #endif
 
   // connect libuv
-  local->request.data = local;
-  local->trigger.data = local;
+  app.request.data = &app;
+  app.trigger.data = &app;
 
   if (args.Length() < 14)
   {
@@ -518,28 +520,28 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
   char *c_connstr = new char[connstr->Utf8Length()+1];
   connstr->WriteUtf8(c_connstr);
 
-  local->fcall.negotiate.Reset (isolate, Local<Function>::Cast(args[2]));
-  local->fcall.connect.Reset   (isolate, Local<Function>::Cast(args[3]));
-  local->fcall.unknown.Reset   (isolate, Local<Function>::Cast(args[4]));
-  local->fcall.helo.Reset      (isolate, Local<Function>::Cast(args[5]));
-  local->fcall.envfrom.Reset   (isolate, Local<Function>::Cast(args[6]));
-  local->fcall.envrcpt.Reset   (isolate, Local<Function>::Cast(args[7]));
-  local->fcall.data.Reset      (isolate, Local<Function>::Cast(args[8]));
-  local->fcall.header.Reset    (isolate, Local<Function>::Cast(args[9]));
-  local->fcall.eoh.Reset       (isolate, Local<Function>::Cast(args[10]));
-  local->fcall.body.Reset      (isolate, Local<Function>::Cast(args[11]));
-  local->fcall.eom.Reset       (isolate, Local<Function>::Cast(args[12]));
-  local->fcall.abort.Reset     (isolate, Local<Function>::Cast(args[13]));
-  local->fcall.close.Reset     (isolate, Local<Function>::Cast(args[14]));
+  app.fcall.negotiate.Reset (isolate, Local<Function>::Cast(args[2]));
+  app.fcall.connect.Reset   (isolate, Local<Function>::Cast(args[3]));
+  app.fcall.unknown.Reset   (isolate, Local<Function>::Cast(args[4]));
+  app.fcall.helo.Reset      (isolate, Local<Function>::Cast(args[5]));
+  app.fcall.envfrom.Reset   (isolate, Local<Function>::Cast(args[6]));
+  app.fcall.envrcpt.Reset   (isolate, Local<Function>::Cast(args[7]));
+  app.fcall.data.Reset      (isolate, Local<Function>::Cast(args[8]));
+  app.fcall.header.Reset    (isolate, Local<Function>::Cast(args[9]));
+  app.fcall.eoh.Reset       (isolate, Local<Function>::Cast(args[10]));
+  app.fcall.body.Reset      (isolate, Local<Function>::Cast(args[11]));
+  app.fcall.eom.Reset       (isolate, Local<Function>::Cast(args[12]));
+  app.fcall.abort.Reset     (isolate, Local<Function>::Cast(args[13]));
+  app.fcall.close.Reset     (isolate, Local<Function>::Cast(args[14]));
 
   bool ok = false;
   if (MI_SUCCESS == smfi_register(desc))
   {
     if (MI_SUCCESS == smfi_setconn(c_connstr))
     {
-      local->loop = uv_default_loop();
-      uv_async_init(local->loop, &local->trigger, trigger_event);
-      uv_queue_work(local->loop, &local->request, milter_worker, milter_cleanup);
+      app.loop = uv_default_loop();
+      uv_async_init(app.loop, &app.trigger, trigger_event);
+      uv_queue_work(app.loop, &app.request, milter_worker, milter_cleanup);
       ok = true;
     }
   }
@@ -547,21 +549,19 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
 
   if (!ok)
   {
-    local->fcall.negotiate.Reset();
-    local->fcall.connect.Reset();
-    local->fcall.unknown.Reset();
-    local->fcall.helo.Reset();
-    local->fcall.envfrom.Reset();
-    local->fcall.envrcpt.Reset();
-    local->fcall.data.Reset();
-    local->fcall.header.Reset();
-    local->fcall.eoh.Reset();
-    local->fcall.body.Reset();
-    local->fcall.eom.Reset();
-    local->fcall.abort.Reset();
-    local->fcall.close.Reset();
-    delete local;
-
+    app.fcall.negotiate.Reset();
+    app.fcall.connect.Reset();
+    app.fcall.unknown.Reset();
+    app.fcall.helo.Reset();
+    app.fcall.envfrom.Reset();
+    app.fcall.envrcpt.Reset();
+    app.fcall.data.Reset();
+    app.fcall.header.Reset();
+    app.fcall.eoh.Reset();
+    app.fcall.body.Reset();
+    app.fcall.eom.Reset();
+    app.fcall.abort.Reset();
+    app.fcall.close.Reset();
     // TODO: throw exception?
   }
 
