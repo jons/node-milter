@@ -1,7 +1,7 @@
 {
     "name": "milter",
     "description": "bindings for writing postfix milter daemons",
-    "version": "0.0.1",
+    "version": "1.0.0",
     "author" : "jon shusta",
     "maintainers":[
         {
@@ -26,6 +26,6 @@
     "devDependencies": {
         "nodeunit": "*"
     },
-    "engines": ["node >=0.4.0"],
+    "engines": ["node >=0.12.0"],
     "keywords": ["postfix", "milter"]
 }
