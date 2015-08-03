@@ -87,11 +87,13 @@ bool MilterEvent::Done (Isolate *isolate, int retval)
   this->fi_retval = retval;
   this->is_done = (0 == pthread_cond_signal(&this->pt_ready));
 
-  // TODO: throw FatalException if the sleeping libmilter thread is not signaled
+  // throw exception if the sleeping libmilter thread is not signaled
+  if (!this->is_done)
+    isolate->ThrowException(Exception::Error(String::NewFromUtf8(isolate, "Condition signal failed")));
 
-  this->Unlock();
-
-  // TODO: throw FatalException if lock is not yielded?
+  // throw exception if event is not yielded back to pthread
+  if (!this->Unlock())
+    isolate->ThrowException(Exception::Error(String::NewFromUtf8(isolate, "Event unlock failed")));
 
   return this->is_done;
 }

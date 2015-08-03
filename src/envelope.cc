@@ -120,7 +120,9 @@ void Envelope::Done (const FunctionCallbackInfo<Value> &args)
   Isolate *isolate = Isolate::GetCurrent();
   HandleScope scope (isolate);
   Envelope *envelope = ObjectWrap::Unwrap<Envelope>(args.Holder());
-
+#ifdef DEBUG_COMMANDS
+  fprintf(stderr, "Envelope::Done started\n");
+#endif
   if (NULL == envelope)
   {
     isolate->ThrowException(Exception::Error(String::NewFromUtf8(isolate, "Done unwrap failed")));
@@ -132,7 +134,7 @@ void Envelope::Done (const FunctionCallbackInfo<Value> &args)
     isolate->ThrowException(Exception::Error(String::NewFromUtf8(isolate, "Envelope done method called outside event context")));
     return;
   }
-  
+
   if (args.Length() < 1)
   {
     isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Wrong number of arguments")));
@@ -146,6 +148,9 @@ void Envelope::Done (const FunctionCallbackInfo<Value> &args)
   }
 
   event->Done(isolate, args[0]->ToNumber()->IntegerValue());
+#ifdef DEBUG_COMMANDS
+  fprintf(stderr, "Envelope::Done completed\n");
+#endif
 }
 
 

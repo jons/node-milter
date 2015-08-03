@@ -46,6 +46,10 @@ void trigger_event (uv_async_t *h)
   HandleScope scope (isolate);
   MilterEvent *ev;
 
+#ifdef DEBUG_ASYNC
+  fprintf(stderr, "trigger_event: begin scope\n");
+#endif
+
   // grab the queue lock
   if (pthread_mutex_lock(&local->lck_queue))
   {
@@ -143,10 +147,16 @@ int generate_event (SMFICTX *context, bindings_t *local, MilterEvent *event)
   for (;;)
   {
     // let the node loop know we await a result
+#ifdef DEBUG_ASYNC
+    fprintf(stderr, "generated_event: uv_async_send\n");
+#endif
     uv_async_send(&local->trigger);
 
     // wait on the event's return condition
     event->Wait();
+#ifdef DEBUG_ASYNC
+    fprintf(stderr, "generate_event: wakeup!\n");
+#endif
     // TODO: check error condition
     if (event->IsDone()) break;
     fprintf(stderr, "generate_event: incomplete task, spurious wakeup\n");
