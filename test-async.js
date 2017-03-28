@@ -39,7 +39,10 @@ function connect (envelope, host, address)
 function helo (envelope, identity)
 {
   console.log("[" + envelope.local.sid + "] helo " + identity);
-  envelope.done(milter.SMFIS_CONTINUE);
+
+  setImmediate(function (env) {
+    env.done(milter.SMFIS_CONTINUE);
+  }, envelope);
 }
 
 
@@ -48,16 +51,20 @@ function unknown (envelope)
 { envelope.done(milter.SMFIS_CONTINUE); }
 
 
-function mailfrom (envelope, addr)
+function mailfrom (envelope, address)
 {
-  console.log("[" + envelope.local.sid + "] from " + addr);
-  envelope.done(milter.SMFIS_CONTINUE);
+  setTimeout(function (env, addr) {
+    console.log("[" + env.local.sid + "] from " + addr);
+    env.done(milter.SMFIS_CONTINUE);
+  }, 500, envelope, address);
 }
 
-function rcptto (envelope, addr)
+function rcptto (envelope, address)
 {
-  console.log("[" + envelope.local.sid + "] rcpt " + addr);
-  envelope.done(milter.SMFIS_CONTINUE);
+  setTimeout(function (env, addr) {
+    console.log("[" + env.local.sid + "] rcpt " + addr);
+    env.done(milter.SMFIS_CONTINUE);
+  }, 2500, envelope, address);
 }
 
 function mstart (envelope)   { envelope.done(milter.SMFIS_CONTINUE); }
@@ -102,4 +109,4 @@ var ok = milter.start(
   abort,    // ?
   close);   // connection event
 
-console.log("test.js milter.start:", ok);
+console.log("test-async.js milter.start:", ok);
