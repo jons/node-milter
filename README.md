@@ -1,8 +1,8 @@
 # node-milter
 node.js bindings for postfix milters
 
-this addon produces libmilter callbacks in node.js so that you don't have to be
-a C programmer to use postfix with libmilter.
+this addon produces libmilter callbacks in node.js v7.7.4 so that you don't have
+to be a C programmer to use postfix with libmilter.
 
 when its main function is called, libmilter creates a threaded daemon where each
 mail session has one unique thread in your program servicing it. this main is
@@ -78,6 +78,12 @@ use of the CONTINUE return code.
     milter.SMFIS_REJECT
 
 
+add a smtpd_milters line to your main.cf that matches your description in milter.start
+and go to town. the test cases included in the project should show you how.
+
+
+MILTER STUFF
+
 other envelope methods.
 access to message modifiers is allowed during the EOM event with these methods.
 
@@ -127,8 +133,9 @@ libmilter uses globals and is not thread-safe. you cannot use multiprocessing
 features in node with this addon.
 
 
-the milter will register in postfix with the name "node-bindings". the name
-"node-milter" is intended to give the project a sensible npm identity.
+the milter will register in postfix with the name "node-bindings", you already
+know it's a milter. the name "node-milter" is intended to give the project a
+sensible npm identity and some github presence, too.
 
 sources implicitly depend on pthreads yet don't use their #include files by name.
   - libmilter explicitly uses pthreads, and libuv is implicitly using them. the
@@ -146,9 +153,5 @@ expected (char *) which is probably stupid. it is unclear to me why there is no
 Buffer::New() that simply accepts (void *) like all the real POSIX C buffer-
 manipulating functions. whatever.
 
-
-ERRATA
-
-this link is gold.
-
-  https://strongloop.com/strongblog/node-js-v0-12-c-apis-breaking/
+some calls probably don't work unless wrapped in setImmediate(), but i don't
+know why yet.

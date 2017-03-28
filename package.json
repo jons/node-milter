@@ -1,7 +1,7 @@
 {
     "name": "milter",
     "description": "bindings for writing postfix milter daemons",
-    "version": "7.7.4",
+    "version": "2.0.0",
     "author" : "jon shusta",
     "maintainers":[
         {
