@@ -66,7 +66,7 @@ class MilterEvent
     MilterEvent *Next () const;
 
     /**
-     * 
+     *
      */
     void SetMilterContext (SMFICTX *context);
 
@@ -84,7 +84,7 @@ class MilterEvent
      *
      */
     virtual void FireWrapper (Isolate *isolate, bindings_t *local) = 0;
-    virtual void Prefire (Isolate *isolate, HandleScope &scope);
+    virtual void Prefire (Isolate *isolate);
     virtual void Postfire (Isolate *isolate);
 
     /**
@@ -125,7 +125,7 @@ class MilterNegotiate : public MilterEvent
     void Negotiate (unsigned long f0, unsigned long f1, unsigned long f2, unsigned long f3);
 
   protected:
-    void Prefire (Isolate *isolate, HandleScope &scope);
+    void Prefire (Isolate *isolate);
 
   private:
     unsigned long f0;

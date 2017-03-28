@@ -27,9 +27,9 @@ Envelope::~Envelope ()
 
 /**
  */
-void Envelope::Init (Handle<Object> target)
+void Envelope::Init (Local<Object> exports)
 {
-  Isolate *isolate = Isolate::GetCurrent();
+  Isolate *isolate = exports->GetIsolate();
   Local<FunctionTemplate> tmpl = FunctionTemplate::New(isolate, New);
   tmpl->SetClassName(String::NewFromUtf8(isolate, "Envelope"));
   tmpl->InstanceTemplate()->SetInternalFieldCount(2);
@@ -56,18 +56,33 @@ void Envelope::Init (Handle<Object> target)
   NODE_SET_PROTOTYPE_METHOD(tmpl, "chgfrom",     SMFI_ChangeFrom);
 
   constructor.Reset(isolate, tmpl->GetFunction());
+  // XXX: uncomment to let the programmer use 'new Envelope()'?
+  //exports->Set(String::NewFromUtf8(Isolate, "Envelope"), tmpl->GetFunction());
 }
 
 
 /**
  */
-Local<Object> Envelope::NewInstance (Isolate *isolate, HandleScope &scope)
+void Envelope::NewInstance (const FunctionCallbackInfo<Value> &args)
 {
-  Handle<Value> argv[0] = { };
+  Isolate *isolate = args.GetIsolate();
+  Local<Value> argv[0] = { };
   Local<Function> cons = Local<Function>::New(isolate, constructor);
-  Local<Object> envelope = cons->NewInstance(0, argv);
+  Local<Context> context = isolate->GetCurrentContext();
+  Local<Object> envelope = cons->NewInstance(context, 0, argv).ToLocalChecked();
+  args.GetReturnValue().Set(envelope);
+}
+
+
+/**
+ */
+Local<Object> Envelope::PrivateInstance (Isolate *isolate)
+{
+  Local<Value> argv[0] = { };
+  Local<Function> cons = Local<Function>::New(isolate, constructor);
+  Local<Context> context = isolate->GetCurrentContext();
+  Local<Object> envelope = cons->NewInstance(context, 0, argv).ToLocalChecked();
   envelope->Set(String::NewFromUtf8(isolate, "local", String::kInternalizedString), Object::New(isolate));
-  //envelope->Ref();
   return envelope;
 }
 
@@ -76,8 +91,7 @@ Local<Object> Envelope::NewInstance (Isolate *isolate, HandleScope &scope)
  */
 void Envelope::New (const FunctionCallbackInfo<Value> &args)
 {
-  Isolate *isolate = Isolate::GetCurrent();
-  HandleScope scope (isolate);
+  Isolate *isolate = args.GetIsolate();
 
   if (args.IsConstructCall())
   {
@@ -90,7 +104,8 @@ void Envelope::New (const FunctionCallbackInfo<Value> &args)
     const unsigned int argc = 0;
     Local<Value> argv[argc] = { };
     Local<Function> cons = Local<Function>::New(isolate, constructor);
-    args.GetReturnValue().Set(cons->NewInstance(argc, argv));
+    Local<Context> context = isolate->GetCurrentContext();
+    args.GetReturnValue().Set(cons->NewInstance(context, argc, argv).ToLocalChecked());
   }
 }
 
@@ -117,8 +132,7 @@ void Envelope::SetMilterContext (SMFICTX *context)
  */
 void Envelope::Done (const FunctionCallbackInfo<Value> &args)
 {
-  Isolate *isolate = Isolate::GetCurrent();
-  HandleScope scope (isolate);
+  Isolate *isolate = args.GetIsolate();
   Envelope *envelope = ObjectWrap::Unwrap<Envelope>(args.Holder());
 #ifdef DEBUG_COMMANDS
   fprintf(stderr, "Envelope::Done started\n");
@@ -147,7 +161,7 @@ void Envelope::Done (const FunctionCallbackInfo<Value> &args)
     return;
   }
 
-  event->Done(isolate, args[0]->ToNumber()->IntegerValue());
+  event->Done(isolate, args[0]->IntegerValue());
 #ifdef DEBUG_COMMANDS
   fprintf(stderr, "Envelope::Done completed\n");
 #endif
@@ -158,8 +172,7 @@ void Envelope::Done (const FunctionCallbackInfo<Value> &args)
  */
 void Envelope::Negotiate (const FunctionCallbackInfo<Value> &args)
 {
-  Isolate *isolate = Isolate::GetCurrent();
-  HandleScope scope (isolate);
+  Isolate *isolate = args.GetIsolate();
   Envelope *envelope = ObjectWrap::Unwrap<Envelope>(args.Holder());
 
   if (NULL == envelope)
@@ -189,10 +202,10 @@ void Envelope::Negotiate (const FunctionCallbackInfo<Value> &args)
       return;
     }
 
-  unsigned long f0 = args[0]->ToNumber()->Uint32Value();
-  unsigned long f1 = args[1]->ToNumber()->Uint32Value();
-  unsigned long f2 = args[2]->ToNumber()->Uint32Value();
-  unsigned long f3 = args[3]->ToNumber()->Uint32Value();
+  unsigned long f0 = args[0]->Uint32Value();
+  unsigned long f1 = args[1]->Uint32Value();
+  unsigned long f2 = args[2]->Uint32Value();
+  unsigned long f3 = args[3]->Uint32Value();
 
   MilterNegotiate *ev = (MilterNegotiate *)event;
   ev->Negotiate(f0, f1, f2, f3);
@@ -203,8 +216,7 @@ void Envelope::Negotiate (const FunctionCallbackInfo<Value> &args)
  */
 void Envelope::SMFI_GetSymbol (const FunctionCallbackInfo<Value> &args)
 {
-  Isolate *isolate = Isolate::GetCurrent();
-  HandleScope scope (isolate);
+  Isolate *isolate = args.GetIsolate();
   Envelope *envelope = ObjectWrap::Unwrap<Envelope>(args.Holder());
 
   if (NULL == envelope)
@@ -232,8 +244,7 @@ void Envelope::SMFI_GetSymbol (const FunctionCallbackInfo<Value> &args)
  */
 void Envelope::SMFI_SetSymbolList (const FunctionCallbackInfo<Value> &args)
 {
-  Isolate *isolate = Isolate::GetCurrent();
-  HandleScope scope (isolate);
+  Isolate *isolate = args.GetIsolate();
   isolate->ThrowException(Exception::Error(String::NewFromUtf8(isolate, "Not yet implemented")));
 
   // TODO: smfi_setsymlist
@@ -244,8 +255,7 @@ void Envelope::SMFI_SetSymbolList (const FunctionCallbackInfo<Value> &args)
  */
 void Envelope::SMFI_SetReply (const FunctionCallbackInfo<Value> &args)
 {
-  Isolate *isolate = Isolate::GetCurrent();
-  HandleScope scope (isolate);
+  Isolate *isolate = args.GetIsolate();
   Envelope *envelope = ObjectWrap::Unwrap<Envelope>(args.Holder());
 
   if (NULL == envelope)
@@ -332,8 +342,7 @@ void Envelope::SMFI_SetReply (const FunctionCallbackInfo<Value> &args)
  */
 void Envelope::SMFI_SetMultilineReply (const FunctionCallbackInfo<Value> &args)
 {
-  Isolate *isolate = Isolate::GetCurrent();
-  HandleScope scope (isolate);
+  Isolate *isolate = args.GetIsolate();
   isolate->ThrowException(Exception::Error(String::NewFromUtf8(isolate, "Not yet implemented")));
 
   // TODO: implement with variable arguments somehow. smfi_setmlreply(rcode,xcode,vaargs)
@@ -344,8 +353,7 @@ void Envelope::SMFI_SetMultilineReply (const FunctionCallbackInfo<Value> &args)
  */
 void Envelope::SMFI_Progress (const FunctionCallbackInfo<Value> &args)
 {
-  Isolate *isolate = Isolate::GetCurrent();
-  HandleScope scope (isolate);
+  Isolate *isolate = args.GetIsolate();
   Envelope *envelope = ObjectWrap::Unwrap<Envelope>(args.Holder());
 
   if (NULL == envelope)
@@ -374,8 +382,7 @@ void Envelope::SMFI_Progress (const FunctionCallbackInfo<Value> &args)
  */
 void Envelope::SMFI_AddHeader (const FunctionCallbackInfo<Value> &args)
 {
-  Isolate *isolate = Isolate::GetCurrent();
-  HandleScope scope (isolate);
+  Isolate *isolate = args.GetIsolate();
   Envelope *envelope = ObjectWrap::Unwrap<Envelope>(args.Holder());
 
   if (NULL == envelope)
@@ -420,7 +427,7 @@ void Envelope::SMFI_AddHeader (const FunctionCallbackInfo<Value> &args)
 
   headerf->WriteUtf8(c_name);
   headerv->WriteUtf8(c_value);
-  
+
   int r = smfi_addheader(envelope->smfi_context, c_name, c_value);
 
   delete [] c_name;
@@ -483,8 +490,7 @@ void Envelope::SMFI_DelRecipient (const FunctionCallbackInfo<Value> &args)
  */
 void Envelope::SMFI_Quarantine (const FunctionCallbackInfo<Value> &args)
 {
-  Isolate *isolate = Isolate::GetCurrent();
-  HandleScope scope (isolate);
+  Isolate *isolate = args.GetIsolate();
   Envelope *envelope = ObjectWrap::Unwrap<Envelope>(args.Holder());
 
   if (NULL == envelope)
@@ -537,8 +543,7 @@ void Envelope::SMFI_Quarantine (const FunctionCallbackInfo<Value> &args)
  */
 void Envelope::SMFI_ChangeFrom (const FunctionCallbackInfo<Value> &args)
 {
-  Isolate *isolate = Isolate::GetCurrent();
-  HandleScope scope (isolate);
+  Isolate *isolate = args.GetIsolate();
   Envelope *envelope = ObjectWrap::Unwrap<Envelope>(args.Holder());
 
   if (NULL == envelope)

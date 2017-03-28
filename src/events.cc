@@ -123,7 +123,7 @@ bool MilterEvent::IsEndMessage () const
  * must be called during trigger_event
  * restore existing object for session
  */
-void MilterEvent::Prefire (Isolate *isolate, HandleScope &scope)
+void MilterEvent::Prefire (Isolate *isolate)
 {
   this->envelope = Local<Object>::New(isolate, this->fi_envelope->object);
 }
@@ -141,8 +141,8 @@ void MilterEvent::Postfire (Isolate *isolate)
  */
 void MilterEvent::Fire (Isolate *isolate, bindings_t *local)
 {
-  HandleScope scope (isolate);
-  this->Prefire(isolate, scope);
+  //HandleScope scope (isolate);
+  this->Prefire(isolate);
 
   Envelope *env = ObjectWrap::Unwrap<Envelope>(this->envelope);
   env->SetCurrentEvent(this);
@@ -158,11 +158,11 @@ void MilterEvent::Fire (Isolate *isolate, bindings_t *local)
  */
 void MilterEvent::DoFCall (Isolate *isolate, Persistent<Function> &pfunc, unsigned int argc, Local<Value> *argv)
 {
-  TryCatch tc;
+  TryCatch tc(isolate);
   Local<Function> fcall = Local<Function>::New(isolate, pfunc);
   fcall->Call(isolate->GetCurrentContext()->Global(), argc, argv);
   if (tc.HasCaught())
-    FatalException(tc);
+    FatalException(isolate, tc);
 }
 
 
@@ -184,9 +184,9 @@ MilterNegotiate::MilterNegotiate (envelope_t *env,
 
 bool MilterNegotiate::IsNegotiate () const { return true; }
 
-void MilterNegotiate::Prefire (Isolate *isolate, HandleScope &scope)
+void MilterNegotiate::Prefire (Isolate *isolate)
 {
-  this->envelope = Envelope::NewInstance(isolate, scope);
+  this->envelope = Envelope::PrivateInstance(isolate);
   this->fi_envelope->object.Reset(isolate, this->envelope);
 }
 
@@ -367,9 +367,10 @@ void MilterMessageData::FireWrapper (Isolate *isolate, bindings_t *local)
   char *nodebuf = new char[len];
   memcpy(nodebuf, buf, len);
   const unsigned argc = 3;
+  Local<Value> argbuf = Buffer::New(isolate, nodebuf, len).ToLocalChecked();
   Local<Value> argv[argc] = {
     this->envelope,
-    Buffer::Use(isolate, nodebuf, len),
+    argbuf,
     Number::New(isolate, len)
   };
   this->DoFCall(isolate, local->fcall.body, argc, argv);

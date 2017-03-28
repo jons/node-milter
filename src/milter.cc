@@ -516,7 +516,7 @@ void milter_start (const FunctionCallbackInfo<Value> &args)
     return;
   }
 
-  desc.xxfi_flags = args[1]->ToNumber()->IntegerValue();
+  desc.xxfi_flags = args[1]->IntegerValue();
 
   // ya dats lazy
   for (int i = 2; i < 15; i++)
@@ -595,7 +595,7 @@ void milter_setbacklog (const FunctionCallbackInfo<Value> &args)
     isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Invalid argument: expected number")));
     return;
   }
-  int n = args[0]->ToNumber()->Value();
+  int n = args[0]->IntegerValue();
   int r = smfi_setbacklog(n);
   args.GetReturnValue().Set(Number::New(isolate, r));
 }
@@ -617,7 +617,7 @@ void milter_setdbg (const FunctionCallbackInfo<Value> &args)
     isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Invalid argument: expected number")));
     return;
   }
-  int f = args[0]->ToNumber()->Value();
+  int f = args[0]->IntegerValue();
   int r = smfi_setdbg(f);
   args.GetReturnValue().Set(Number::New(isolate, r));
 }
@@ -639,7 +639,7 @@ void milter_settimeout (const FunctionCallbackInfo<Value> &args)
     isolate->ThrowException(Exception::TypeError(String::NewFromUtf8(isolate, "Invalid argument: expected number")));
     return;
   }
-  int timeo = args[0]->ToNumber()->Value();
+  int timeo = args[0]->IntegerValue();
   int r = smfi_settimeout(timeo);
   args.GetReturnValue().Set(Number::New(isolate, r));
 }

@@ -21,18 +21,20 @@ using namespace node;
 class Envelope : public ObjectWrap
 {
   public:
-    static void Init (Handle<Object> target);
-
-    static Local<Object> NewInstance (Isolate *isolate, HandleScope &scope);
+    static void Init (Local<Object> exports);
 
     void SetCurrentEvent (MilterEvent *event);
     void SetMilterContext (SMFICTX *context);
+
+    static Local<Object> PrivateInstance (Isolate *isolate);
 
   private:
     explicit Envelope ();
     ~Envelope ();
 
     static Persistent<Function> constructor;
+
+    static void NewInstance (const FunctionCallbackInfo<Value> &args);
 
     static void New (const FunctionCallbackInfo<Value> &args);
 
