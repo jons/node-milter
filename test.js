@@ -38,16 +38,28 @@ function connect (envelope, host, address)
  */
 function helo (envelope, identity)
 {
-  global.gc();
   console.log("[" + envelope.local.sid + "] helo " + identity);
   envelope.done(milter.SMFIS_CONTINUE);
 }
 
 
 //
-function unknown (envelope)  { envelope.done(milter.SMFIS_CONTINUE); }
-function mailfrom (envelope) { envelope.done(milter.SMFIS_CONTINUE); }
-function rcptto (envelope)   { envelope.done(milter.SMFIS_CONTINUE); }
+function unknown (envelope)
+{ envelope.done(milter.SMFIS_CONTINUE); }
+
+
+function mailfrom (envelope, addr)
+{
+  console.log("[" + envelope.local.sid + "] from " + addr);
+  envelope.done(milter.SMFIS_CONTINUE);
+}
+
+function rcptto (envelope, addr)
+{
+  console.log("[" + envelope.local.sid + "] rcpt " + addr);
+  envelope.done(milter.SMFIS_CONTINUE);
+}
+
 function mstart (envelope)   { envelope.done(milter.SMFIS_CONTINUE); }
 function header (envelope)   { envelope.done(milter.SMFIS_CONTINUE); }
 function eoh (envelope)      { envelope.done(milter.SMFIS_CONTINUE); }
